@@ -1,7 +1,7 @@
 # Meter
 Meter meters your meeter meter over metered connections
 
-Metered Transmission Router files (.mtr) basically shortened **M**E**T**E**R** files
+Metered Transmission Router files (.mtr) basically shortened M<sub><sup>E</sup></sub>T<sub><sup>E</sup></sub>R files
 show how one can access such content easily over metered connections
 without worry of what it might cost in terms of data
 
