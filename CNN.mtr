@@ -28,7 +28,7 @@
       <text>cnn.com/</text>
       <rule id="date"/>
       <text>/</text>
-      <rule id="category">
+      <rule id="category"/>
       <text>/</text>
       <any/>
     </validate>
@@ -40,7 +40,7 @@
     <!-- user doesnt know (not exact, but search) so:
          From CNN (translation.rule.id), I want to find [a CNN news article] (translator.option.name) referencing (translator.option.text) [CNN article keywords] (translator.option.input). Search! (translator.option.text) -->
     <text>referencing:</text>
-    <input id="search" tbd="CNN article keywords">
+    <input id="search" tbd="CNN article keywords"/>
     <text>. Search!</text>
   </option>
 </translator>
