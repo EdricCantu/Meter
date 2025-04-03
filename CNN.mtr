@@ -1,10 +1,10 @@
 <translator name="CNN" main="cnn.com">
   <rule id="date">
-    <yearNum></yearNum>
+    <year-number></year-number>
     <text>/</text>
-    <monthNum pad="1"></monthNum>
+    <month-number pad="1"></month-number>
     <text>/</text>
-    <dayNum pad="1"></dayNum>
+    <day-number pad="1"></day-number4>
   </rule>
   <rule id="category">
     <one-of>
