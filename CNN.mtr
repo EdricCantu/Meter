@@ -1,4 +1,4 @@
-<translator name="CNN" main="cnn.com">
+<router name="CNN" main="cnn.com">
   <rule id="date">
     <year-number></year-number>
     <text>/</text>
@@ -24,7 +24,7 @@
     </one-of>
   </rule>
   <option name="the CNN news article" id="the CNN news article at a URL" exact="1"><!--options show "I want to "+[....., "see the CNN news article at a URL"]--> 
-    <!-- From [CNN] (translator.name), I want to see [the CNN news article] (translator.option.name) at (translator.option.text) [CNN article URL] (translator.option.input)-->
+    <!-- From [CNN] (router.name), I want to see [the CNN news article] (router.option.name) at (router.option.text) [CNN article URL] (router.option.input)-->
     <text>at</text>
     <input id="url" tbd="CNN article URL"></input>
     <validate id="url">
@@ -38,13 +38,13 @@
     </validate>
   </option>
   <option name="the CNN homepage" id="the CNN homepage" exact="1"><!--options show "I want to "+[....., "see the CNN homepage"]--> 
-    <!-- From [CNN] (translator.name), I want to see [the CNN homepage] (translator.option.name) -->
+    <!-- From [CNN] (router.name), I want to see [the CNN homepage] (router.option.name) -->
   </option>
   <option name="a CNN News article" search="1"><!--options show "I want to "+[....., "find a CNN news article"]--> 
     <!-- user doesnt know (not exact, but search) so:
-         From CNN (translation.rule.id), I want to find [a CNN news article] (translator.option.name) referencing (translator.option.text) [CNN article keywords] (translator.option.input). Search! (translator.option.text) -->
+         From CNN (router.rule.id), I want to find [a CNN news article] (router.option.name) referencing (router.option.text) [CNN article keywords] (router.option.input). Search! (router.option.text) -->
     <text>referencing:</text>
     <input id="search" tbd="CNN article keywords"></input>
     <text>. Search!</text>
   </option>
-</translator>
+</router>
