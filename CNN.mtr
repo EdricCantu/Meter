@@ -4,43 +4,60 @@
     <text>/</text>
     <month-number pad="1"></month-number>
     <text>/</text>
-    <day-number pad="1"></day-number4>
+    <day-number pad="1"></day-number>
   </rule>
   <rule id="category">
     <one-of>
-      <one>middleeast</one>
-      <one>africa</one>
-      <one>asia</one>
-      <one>business</one>
-      <one>politics</one>
-      <one>economy</one>
-      <one>politics</one>
-      <one>entertainment</one>
-      <one>technology</one>
-      <one>health</one>
-      <one>travel</one>
-      <one>world</one>
-      <one>us</one>
+      <one><text>middleeast</one>
+      <one><text>africa</text></one>
+      <one><text>asia</text></one>
+      <one><text>business</text></one>
+      <one><text>politics</text></one>
+      <one><text>economy</text></one>
+      <one><text>entertainment</text></one>
+      <one><text>technology</text></one>
+      <one><text>health</text></one>
+      <one><text>travel</text></one>
+      <one><text>world</text></one>
+      <one><text>us</text></one>
     </one-of>
   </rule>
-  <option name="the CNN news article" id="the CNN news article at a URL" exact="1"><!--options show "I want to "+[....., "see the CNN news article at a URL"]--> 
+  <option name="see the CNN news article" select="see the CNN news article at a URL"><!--options show "I want to "+[....., "see the CNN news article at a URL"]--> 
     <!-- From [CNN] (router.name), I want to see [the CNN news article] (router.option.name) at (router.option.text) [CNN article URL] (router.option.input)-->
     <text>at</text>
-    <input id="url" tbd="CNN article URL"></input>
-    <validate id="url">
-      <maybe>www.</maybe>
-      <text>cnn.com/</text>
-      <rule id="date"></rule>
-      <text>/</text>
-      <rule id="category"></rule>
-      <text>/</text>
-      <any></any>
-    </validate>
+    <input id="url" tbd="CNN article URL">
+      <validate>
+        <begin></begin>
+        <one-of>
+          <one></one>
+          <one><text>www.</text></one>
+        </one-of>
+        <text>cnn.com/</text>
+        <rule id="date"></rule>
+        <text>/</text>
+        <rule id="category"></rule>
+        <text>/</text>
+        <rule id="title" but="/"></rule>
+        <one-of>
+          <one></one>
+          <one><text>/</text></one>
+          <one><text>/index</text></one>
+          <one><text>/index.html</text></one>
+        </one-of>
+        <end></end>
+      </validate>
+    </input>
+    <solo><!--more restricted-->
+      
+    <solo>
+    <relay for="node"><!--more things included-->
+
+    </relay>
   </option>
-  <option name="the CNN homepage" id="the CNN homepage" exact="1"><!--options show "I want to "+[....., "see the CNN homepage"]--> 
+  <option name="see the CNN homepage"><!--options show "I want to "+[....., "see the CNN homepage"]--> 
     <!-- From [CNN] (router.name), I want to see [the CNN homepage] (router.option.name) -->
   </option>
-  <option name="a CNN News article" search="1"><!--options show "I want to "+[....., "find a CNN news article"]--> 
+  <option name="find a CNN news article"><!--options show "I want to "+[....., "find a CNN news article"]--> 
     <!-- user doesnt know (not exact, but search) so:
          From CNN (router.rule.id), I want to find [a CNN news article] (router.option.name) referencing (router.option.text) [CNN article keywords] (router.option.input). Search! (router.option.text) -->
     <text>referencing:</text>

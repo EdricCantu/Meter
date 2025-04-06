@@ -1,0 +1,36 @@
+<router name="NPR" main="npr.org">
+  <rule id="date">
+    <year-number></year-number>
+    <text>/</text>
+    <month-number pad="1"></month-number>
+    <text>/</text>
+    <day-number pad="1"></day-number>
+  </rule>
+  <option name="see the NPR article" id="see the NPR article at a URL">
+    <text>at</text>
+    <input id="url" tbd="NPR article URL"></input>
+    <validate id="url">
+      <begin></begin>
+      <one-of>
+        <one><text></text></one>
+        <one><text>www.</text></one>
+        <one><text>text.</text></one>
+      </one-of>
+      <text>npr.org/</text>
+      <rule id="date"></rule>
+      <text>/</text>
+      <rule id="id" but="/"></rule>
+      <!--after this who cares, NPR doesn't-->
+    </validate>
+  </option>
+  <option name="see the NPR homepage">
+    
+  </option>
+  <option name="find a CNN news article"><!--options show "I want to "+[....., "find a CNN news article"]--> 
+    <!-- user doesnt know (not exact, but search) so:
+         From CNN (router.rule.id), I want to find [a CNN news article] (router.option.name) referencing (router.option.text) [CNN article keywords] (router.option.input). Search! (router.option.text) -->
+    <text>referencing:</text>
+    <input id="search" tbd="CNN article keywords"></input>
+    <text>. Search!</text>
+  </option>
+</router>
