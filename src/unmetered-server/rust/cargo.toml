@@ -1,3 +1,12 @@
+[package]
+name = "rust"
+version = "0.1.0"
+edition = "2024"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 if-addrs = "0.6"
+
+[[bin]]
+name = "rust"
+path = "main.rs"
