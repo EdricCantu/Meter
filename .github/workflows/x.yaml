@@ -20,14 +20,13 @@ on:
   #      type: environment
    #     required: truejobs
 jobs:
-  letknow:
-    runs-on: ubuntu-latest
-    steps:
-    - name: echo
-      run: echo "ssh-keygen -o -a 100 -t ed25519 -f ~/.ssh/id_ed25519 -C yourusername@company; ssh -i ~/.ssh/id_ed25519 abcxyz"
   build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+    - name: https://www.rust-lang.org/tools/install
+      run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    - name: https://github.com/lhotari/action-upterm/issues/9
+      run: echo "ssh-keygen -o -a 100 -t ed25519 -f ~/.ssh/id_ed25519 -C yourusername@company; ssh -i ~/.ssh/id_ed25519 abcxyz"
     - name: Setup upterm session
       uses: lhotari/action-upterm@v1
