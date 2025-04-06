@@ -19,7 +19,7 @@ on:
  #       description: 'env'
   #      type: environment
    #     required: truejobs
-run:
+jobs:
   build:
     runs-on: ubuntu-latest
     steps:
