@@ -89,7 +89,7 @@ fn list_private_ipv4s() {
         }
 
         results
-            .entry(iface.name)
+            .entry(iface.name.clone())
             .or_insert_with(Vec::new)
             .push(iface.ip().to_string());
     }
