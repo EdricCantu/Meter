@@ -15,10 +15,10 @@ on:
         description: 'bool'
         required: false
         type: boolean
-      environment:
-        description: 'env'
-        type: environment
-        required: truejobs
+#      environment:
+ #       description: 'env'
+  #      type: environment
+   #     required: truejobs
   build:
     runs-on: ubuntu-latest
     steps:
