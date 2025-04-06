@@ -1,0 +1,27 @@
+name: CI
+on:
+  workflow_dispatch:
+    inputs:
+      logLevel:
+        description: 'drop'
+        required: true
+        default: 'warning'
+        type: choice
+        options:
+        - info
+        - warning
+        - debug
+      tags:
+        description: 'bool'
+        required: false
+        type: boolean
+      environment:
+        description: 'env'
+        type: environment
+        required: truejobs
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup upterm session
+      uses: lhotari/action-upterm@v1

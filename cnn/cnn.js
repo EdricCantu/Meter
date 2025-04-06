@@ -1,3 +1,4 @@
+
 const process = {env:{url: location.href}}
 const url = process.env.url;
 const x = (new DOMParser).parseFromString(await ((await fetch(url)).text()), "text/html");
