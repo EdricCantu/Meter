@@ -20,6 +20,10 @@ on:
   #      type: environment
    #     required: truejobs
 jobs:
+  letknow:
+    runs-on: ubuntu-latest
+    steps:
+    - run: echo "hello"
   build:
     runs-on: ubuntu-latest
     steps:
