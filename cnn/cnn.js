@@ -1,6 +1,4 @@
 
-const process = {env:{url: location.href}}
-const url = process.env.url;
 const x = (new DOMParser).parseFromString(await ((await fetch(url)).text()), "text/html");
 var secondaryLogo = x.querySelector("header .brand-logo__theme-link")
   secondaryLogo = secondaryLogo.href //link of sub brand, which by the ending path, one could infer the subbrand, like CNN *Business*, CNN *Politics*, 
@@ -14,7 +12,8 @@ if(lastByline instanceof Text) byline.unshift(['t', lastByline.textContent.slice
 if(lastByline instanceof HTMLAnchorElement){byline.pop(); byline.unshift(['a', lastByline.textContent, byline[0].href])}
 const readTime = x.querySelector(".headline__sub-description").innerText.trim(); //time it takes to read
 const timeStamp = x.querySelector(".timestamp").innerText.trim(); //when updated or posted
-const body = x.querySelector("main")
+const body = x.querySelector("main");
+//later
 const bodyContent = x.querySelector(".article__content");
 var bodySourceLocation = null; //display location of news source
 var bodySource = null; //like lastbyline, display news source
@@ -30,7 +29,7 @@ for(const elem of bodyContent.children){
               :(
                 (subelemInd +1 == elem.childNodes.length)?
                   (subelem.textContent.trimEnd())
-                  :(subElem.textContent)
+                  :(subelem.textContent)
               )
           ];
         }
@@ -66,7 +65,7 @@ for(const elem of bodyContent.children){
 const obj = {headline, readTime, timeStamp, newBody, secondaryLogo, breadcrumb, byline}
 
 
-function convertToHTMLDocument(obj) {
+  function convertToHTMLDocument(obj) {
     const doc = document.implementation.createHTMLDocument(obj.headline);
     const body = doc.body;
   
@@ -170,3 +169,32 @@ function convertToHTMLDocument(obj) {
     return doc;
   }
   
+export const matches = /^(|[\w\-]+\.)cnn\.(com|io|it)$/;
+export function relayer(req, res){
+  
+  if(!req.headers?.["minify"]){//if parser not downloaded, download it
+    res.setHeader("minify", "?");
+    res.statusCode = 200;
+    return res.end();
+  }//if it is donwloaded:
+  if(!req.headers["minify"].match(/^\?\d$/g)){//check for proper stuff (just if it's modified, at least the guy knows what he's doing)
+    res.setHeader("minify", "?");
+    res.statusCode = 400;
+    return res.end();
+  }//if it's downloaded and sending the proper syntax:
+  let proxyToServerSocket = net.createConnection(
+    {
+      host: serverAddr,
+      port: serverPort,
+    },
+    () => {
+      console.log("Proxy connected to server");
+    }
+  );
+  if(req.headers["minify"] !== "?0"){res.setHeader("minify", "?1");
+
+  }else{
+    res.setHeader("minify", "?0");
+
+  }
+}
