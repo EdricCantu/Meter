@@ -82,17 +82,20 @@ app.on("connection", proxyClient => {
             }
             if(!methodValid){//method is invalid. also catches long methods (which are also invalid)
               console.warn(`ERR: UNSUPPORTED_METHOD recieved from "${proxyClient.remoteAddress}"; Expected a valid HTTP Method but began reading "${method}"`);
-              return proxyClient.write("ERR: UNSUPPORTED_METHOD");
+              proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_METHOD");
+              return proxyClient.end();
             }
           }else{//assume method is done
             if(byte !== 0x20){
               console.warn(`ERR: BAD_DELIMITER from "${proxyClient.remoteAddress}"; Expected space (ASCII 0x20) but got "${strb}"`);
-              return proxyClient.write("ERR: BAD_DELIMITER");
+              proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: BAD_DELIMITER");
+              return proxyClient.end();
             }
             var methodValid = "CONNECT,GET,HEAD,POST,PUT,DELETE,PATCH,OPTIONS,TRACE".split(",").includes(method);
             if(!methodValid){//
               console.warn(`ERR: UNSUPPORTED_METHOD recieved from "${proxyClient.remoteAddress}"; Expected a complete, valid HTTP Method but ended prematurely with "${method}"`);
-              return proxyClient.write("ERR: UNSUPPORTED_METHOD")
+              proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_METHOD");
+              return proxyClient.end();
             }
             //passed all checks, move on to url
             tokening = ["url","host"];
@@ -105,22 +108,26 @@ app.on("connection", proxyClient => {
                 if("0123456789ABCDEFabcdef".split("").includes(strb)){
                   if(host.length === 3 && host[1] === ""){//currently ["[", "", ""], meaning a colon went first, then hex. no point on checking host[2] since this line stops any further altering of it. should never be ["[","","ABCD"....]
                     console.warn(`ERR: INVALID_IPv6 recieved from "${proxyClient.remoteAddress}"; A leading singular-colon was found, which is not allowed`);
-                    return proxyClient.write("ERR: INVALID_IPv6");
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: INVALID_IPv6");
+                    return proxyClient.end();
                   }else if(host[host.length-1].length === 4){//invalid IPv6
                     console.warn(`ERR: INVALID_IPv6 recieved from "${proxyClient.remoteAddress}"; IPv6 label too long, more than 4 hex digits`);
-                    return proxyClient.write("ERR: INVALID_IPv6");
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: INVALID_IPv6");
+                    return proxyClient.end();
                   }else{//valid
                     host[host.length-1] += strb;
                   }
                 }else if(strb === ":"){
                   if(host.length === 5 && !zeroGroupUsed){//currently ["[","0123","4567","89AB","CDEF"], going to 6 is too long: [0123:4567:89AB:CDEF(:X)]
                     console.warn(`ERR: INVALID_IPv6 recieved from "${proxyClient.remoteAddress}"; IPv6 too long, more than 4 labels`);
-                    return proxyClient.write("ERR: INVALID_IPv6");
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: INVALID_IPv6");
+                    return proxyClient.end();
                   }else if(host.length === 6 && zeroGroupUsed)// currently ["[",("","",)"4567",("","",)"89AB",("","",)"CDEF"(,"","")], going to 7 is too long: [::4567:89AB:CDEF(:X)], [0123::89AB:CDEF(:X)], [0123:4567::CDEF(:X)], [0123::89AB:CDEF(:X)],
                   if(host[host.length-1] === ""){//double colon
                     if(!zeroGroupUsed){//prevent more than one instance of a double colon, as well as triple colons
                       console.warn(`ERR: NON_STANDARD_IPv6 recieved from "${proxyClient.remoteAddress}"; found more than one instance of two consecutive colons, which are not allowed`);
-                      return proxyClient.write("ERR: INVALID_IPv6");
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: INVALID_IPv6");
+                      return proxyClient.end();
                     }else{
                       host.push("")
                     }
@@ -131,7 +138,8 @@ app.on("connection", proxyClient => {
                   if(host[host.length-1] === ""){//ended with colon
                     if(host[host.length-2] !== ""){//ended with single colon, not allowed
                       console.warn(`ERR: INVALID_IPv6 recieved from "${proxyClient.remoteAddress}";  A leading singular-colon was found, which is not allowed`);
-                      return proxyClient.write("ERR: INVALID_IPv6");
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: INVALID_IPv6");
+                      return proxyClient.end();
                     }else{//otherwise ended in double colon
                       host.push(strb);
                       tokening = ["port"]
@@ -147,16 +155,20 @@ app.on("connection", proxyClient => {
               }else if(strb === "."){
                 if(host[host.length-1] == ""){//if double dotted
                   console.warn(`ERR: EMPTY_HOSTNAME_LABEL recieved from "${proxyClient.remoteAddress}"; expected another label but got "."`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else if(host[host.length-1].endsWith("-")){//check for ending dash
                   console.warn(`ERR: HOSTNAME_LABEL_END_IN_DASH recieved from "${proxyClient.remoteAddress}"; expected completion of label but got "."`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else if(host[host.length-1].length == 63){//check label length
                   console.warn(`ERR: HOSTNAME_LABEL_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected port-delimiting colon but got another letter`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else if(hostlength === 255){//check whole length
                   console.warn(`ERR: HOSTNAME_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected a maximum of 255 bytes for a hostname but exceeded`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else{//continue to next label
                   host.push("");
                   hostlength++;
@@ -165,10 +177,12 @@ app.on("connection", proxyClient => {
                    // ( ((   UPPER LATIN LETTER   ))  ||  ((   LOWER LATIN LETTER   ))  ||  ((   NUMBERS  /  DIGITS   )) )
                 if(host[host.length-1].length == 63){//check label length
                   console.warn(`ERR: HOSTNAME_LABEL_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected port-delimiting colon but got another letter`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else if(hostlength === 255){//check whole length
                   console.warn(`ERR: HOSTNAME_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected a maximum of 255 bytes for a hostname but exceeded`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else{
                   host[host.length-1] += strb;
                   hostlength++;
@@ -176,13 +190,16 @@ app.on("connection", proxyClient => {
               }else if(strb === "-"){
                 if(host[host.length-1] === ""){//if empty label, therefore label has beginning dash
                   console.warn(`ERR: HOSTNAME_LABEL_BEGIN_IN_DASH recieved from "${proxyClient.remoteAddress}"; expected letter or number but got "-"`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else if(host[host.length-1].length == 63){//check label length
                   console.warn(`ERR: HOSTNAME_LABEL_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected port-delimiting colon but got another letter`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else if(hostlength === 255){//check whole length
                   console.warn(`ERR: HOSTNAME_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected a maximum of 255 bytes for a hostname but exceeded`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else{
                   host[host.length-1] += strb;
                   hostlength++;
@@ -191,25 +208,30 @@ app.on("connection", proxyClient => {
                 if(allowLocals){
                   if(host[host.length-1].length == 63){//check label length
                     console.warn(`ERR: HOSTNAME_LABEL_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected port-delimiting colon but got another letter`);
-                    return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                    return proxyClient.end();
                   }else if(hostlength === 255){//check whole length
                     console.warn(`ERR: HOSTNAME_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected a maximum of 255 bytes for a hostname but exceeded`);
-                    return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                    return proxyClient.end();
                   }else{
                     host[host.length-1] += strb;
                     hostlength++;
                   }
                 }else{
                   console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; expected letter, number, dash, or period, but got an underdash, in attempt to access a locally hosted platform`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }
               }else if(strb === ":"){
                 if(host[host.length-1] == ""){//check if "." before ":"
                   console.warn(`ERR: EMPTY_HOSTNAME_LABEL recieved from "${proxyClient.remoteAddress}"; expected another label but got "."`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else if(host[host.length-1].endsWith("-")){//check if "-" before ":", if ending in dash
                   console.warn(`ERR: HOSTNAME_LABEL_END_IN_DASH recieved from "${proxyClient.remoteAddress}"; expected completion of label but got "."`);
-                  return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                  return proxyClient.end();
                 }else{
                   if(!allowLocals){
                     if(
@@ -224,16 +246,19 @@ app.on("connection", proxyClient => {
                     ){//if IP
                       if(host[0] === "0" && host[1] === "0" && host[2] === "0" && host[3] === "0"){
                         console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 0.0.0.0 is restricted`);
-                        return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                        return proxyClient.end();
                       }else if(host[0] === "127"){
                         console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 127.X.X.X is restricted`);
-                        return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                        return proxyClient.end();
                       }else{//go on
                         tokening[1] = "port";
                       }
                     }else if(!tld.includes(host[host.length-1].toUpperCase())){ //not an IP, if TLD not publicly recognized:
                       console.warn(`ERR: UNSUPPORTED_HOSTNAME recieved from "${proxyClient.remoteAddress}"; TLD isn't recognized: "${host[host.length-1]}"`);
-                      return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                      return proxyClient.end();
                     }else{//go on
                       tokening[1] = "port";
                     }
@@ -243,7 +268,8 @@ app.on("connection", proxyClient => {
                 }
               }else if(strb === " "){
                 console.warn(`ERR: PREMATURE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected more information but recieved ending marker (SPACE, " ", 0x20) for url`);
-                return proxyClient.write("ERR: UNSUPPORTED_URL");
+                proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_URL");
+                return proxyClient.end();
               }else if(strb === "/"){
                 if(host[0] === ""){//<METHOD> (???)/<pathname> <httpv>
                   console.warn(`ERR: PROXY_CLIENTS_ONLY recieved from "${proxyClient.remoteAddress}"; recieved a move to a pathname (SOLIDUS, "/", 0x2F) from the beginning, but only HTTP servers handle that!`);
@@ -251,11 +277,13 @@ app.on("connection", proxyClient => {
                   return proxyClient.end();
                 }else{
                   console.warn(`ERR: PORT_REQUIRED recieved from "${proxyClient.remoteAddress}"; recieved a move to a pathname (SOLIDUS, "/", 0x2F) instead of a port, but proxies require ports`);
-                  return proxyClient.write("ERR: PORT_REQUIRED");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PORT_REQUIRED");
+                  return proxyClient.end();
                 }
               }else{
                 console.warn(`ERR: HOSTNAME_HAS_ILLEGAL_CHARACTER recieved from "${proxyClient.remoteAddress}"; expected letter, number, dash, or period, but got an unhandleable character`);
-                return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                return proxyClient.end();
               }
               
               break;
@@ -263,10 +291,12 @@ app.on("connection", proxyClient => {
               if((byte >= 0x30 && byte <= 0x39)){
                 if((port === "") && (strb === "0")){//though allowed by specs, can open room for unlimited zeroes, and in hand crashes. to be implemented proper handling
                   console.warn(`ERR: PORT_PADDED recieved from "${proxyClient.remoteAddress}"; expected beginning number of 1-9, but got 0`);
-                  return proxyClient.write("ERR: PORT_ILLEGAL");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PORT_ILLEGAL");
+                  return proxyClient.end();
                 }else if(parseInt(port+=strb) > 65535){// highest 65535
                   console.warn(`ERR: PORT_TOO_LARGE recieved from "${proxyClient.remoteAddress}"; port doesnt exist, expected port below 65536`);
-                  return proxyClient.write("ERR: PORT_ILLEGAL");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PORT_ILLEGAL");
+                  return proxyClient.end();
                 }
               }else if(strb === "/"){
                 port = parseInt(port);
@@ -276,18 +306,21 @@ app.on("connection", proxyClient => {
                   tokening = ["httpv"];
                 }else{
                   console.warn(`ERR: PREMATURE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected more information but recieved ending marker (SPACE, " ", 0x20) for url`);
-                  return proxyClient.write("ERR: UNSUPPORTED_URL");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_URL");
+                  return proxyClient.end();
                 }
               }else{
                 console.warn(`ERR: PORT_HAS_ILLEGAL_CHARACTER recieved from "${proxyClient.remoteAddress}"; expected a number, but got an unhandleable character`);
-                return proxyClient.write("ERR: PORT_ILLEGAL");
+                proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PORT_ILLEGAL");
+                return proxyClient.end();
               }
               break;
             case "path":
               if("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/?:@!$&'()*+,;=%".split("").includes(strb)){//i dont care how it looks, pass it on to the receiving server. as long as it's one of these, it's correct in my book
                 if(path.length === 10000){
                   console.warn(`ERR: PATH_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected a path shorter than 10k chars, but exceeded`);
-                  return proxyClient.write("ERR: PATH_LONG");
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PATH_LONG");
+                  return proxyClient.end();
                 }else{
                   path += strb
                 }
@@ -295,7 +328,8 @@ app.on("connection", proxyClient => {
                 tokening = ["httpv"];
               }else{
                 console.warn(`ERR: PATH_HAS_ILLEGAL_CHARACTER recieved from "${proxyClient.remoteAddress}"; expected a valid path character , but got an unhandleable character`);
-                return proxyClient.write("ERR: PATH_ILLEGAL");
+                proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PATH_ILLEGAL");
+                return proxyClient.end();
               }
               break;
           }
@@ -314,10 +348,12 @@ app.on("connection", proxyClient => {
             tokening = ["headers"];
           }else if(httpv === "HTTP/1.1 "){
             console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; didn't expect more information on the same line`);
-            return proxyClient.write("ERR: PURPOSES_UNKNOWN");//"What am i supposed to do with this?"
+            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+            return proxyClient.end();//"What am i supposed to do with this?"
           }else{
             console.warn(`ERR: HTTP_VERSION_UNSUPPORTED_OR_ILLEGAL recieved from "${proxyClient.remoteAddress}"; expected a HTTP/1.1 , but got something else`,`\nStopped at: "${requestLine}"\n`,{method,host,port,path,httpv});
-            return proxyClient.write("ERR: UNSUPPORTED_HTTP_VER");
+            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HTTP_VER");
+            return proxyClient.end();
           }
           break;
         case "headers":
