@@ -64,10 +64,13 @@ app.on("connection", proxyClient => {
      var hostlength = 0;
     var port = "";
     var path = "";
+    var httpv = "";
+    var requestLine = "";
     var tokening = ["method"];
     for(const addr in data){
       const byte = data[addr];
       const strb = String.fromCharCode(byte);
+      requestLine += strb;
       switch(tokening[0]){
         case "method"://to be implemented: nonstandard methods
           if ((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)) {
@@ -228,9 +231,11 @@ app.on("connection", proxyClient => {
                       }else{//go on
                         tokening[1] = "port";
                       }
-                    }else if(!tld.includes(host[host.length-1])){ //not an IP, if TLD not publicly recognized:
-                      console.warn(`ERR: UNSUPPORTED_HOSTNAME recieved from "${proxyClient.remoteAddress}"; TLD isn't recognized`);
+                    }else if(!tld.includes(host[host.length-1].toUpperCase())){ //not an IP, if TLD not publicly recognized:
+                      console.warn(`ERR: UNSUPPORTED_HOSTNAME recieved from "${proxyClient.remoteAddress}"; TLD isn't recognized: "${host[host.length-1]}"`);
                       return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
+                    }else{//go on
+                      tokening[1] = "port";
                     }
                   }else{//who cares
                     tokening[1] = "port";
@@ -240,8 +245,14 @@ app.on("connection", proxyClient => {
                 console.warn(`ERR: PREMATURE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected more information but recieved ending marker (SPACE, " ", 0x20) for url`);
                 return proxyClient.write("ERR: UNSUPPORTED_URL");
               }else if(strb === "/"){
-                console.warn(`ERR: PORT_REQUIRED recieved from "${proxyClient.remoteAddress}"; recieved a move to a pathname (SOLIDUS, "/", 0x2F) instead of a port, but proxies require ports`);
-                return proxyClient.write("ERR: PORT_REQUIRED");
+                if(host[0] === ""){//<METHOD> (???)/<pathname> <httpv>
+                  console.warn(`ERR: PROXY_CLIENTS_ONLY recieved from "${proxyClient.remoteAddress}"; recieved a move to a pathname (SOLIDUS, "/", 0x2F) from the beginning, but only HTTP servers handle that!`);
+                  proxyClient.write("HTTP/1.1 418 I'm a proxy\n\nI'm a proxy!");
+                  return proxyClient.end();
+                }else{
+                  console.warn(`ERR: PORT_REQUIRED recieved from "${proxyClient.remoteAddress}"; recieved a move to a pathname (SOLIDUS, "/", 0x2F) instead of a port, but proxies require ports`);
+                  return proxyClient.write("ERR: PORT_REQUIRED");
+                }
               }else{
                 console.warn(`ERR: HOSTNAME_HAS_ILLEGAL_CHARACTER recieved from "${proxyClient.remoteAddress}"; expected letter, number, dash, or period, but got an unhandleable character`);
                 return proxyClient.write("ERR: UNSUPPORTED_HOSTNAME");
@@ -274,7 +285,12 @@ app.on("connection", proxyClient => {
               break;
             case "path":
               if("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/?:@!$&'()*+,;=%".split("").includes(strb)){//i dont care how it looks, pass it on to the receiving server. as long as it's one of these, it's correct in my book
-                path += strb
+                if(path.length === 10000){
+                  console.warn(`ERR: PATH_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected a path shorter than 10k chars, but exceeded`);
+                  return proxyClient.write("ERR: PATH_LONG");
+                }else{
+                  path += strb
+                }
               }else if(strb === " "){
                 tokening = ["httpv"];
               }else{
@@ -283,11 +299,13 @@ app.on("connection", proxyClient => {
               }
               break;
           }
+          break;
         case "httpv":
           httpv+=strb;
           if("HTTP/1.1".startsWith(httpv)){//["H","HT","HTT","HTTP","HTTP", "HTTP/"].includes(httpv)
             //only version supporting persistent connections over Text. (because HTTP)
-            //previous version is outdated HTTP/1.1 and next version is only (mainly) available via TLS
+            //previous version is outdated HTTP/1.1 and next version is only (mainly) available via TLS, and in binary format. 
+            // couldn't handle HTTP/2 anyway, and HTTP/1 too old.
             //do nothing
           }else if(httpv === "HTTP/1.1\r"){
             //see what they're doing
@@ -298,22 +316,22 @@ app.on("connection", proxyClient => {
             console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; didn't expect more information on the same line`);
             return proxyClient.write("ERR: PURPOSES_UNKNOWN");//"What am i supposed to do with this?"
           }else{
-            console.warn(`ERR: HTTP_VERSION_UNSUPPORTED_OR_ILLEGAL recieved from "${proxyClient.remoteAddress}"; expected a valid path character , but got an unhandleable character`);
+            console.warn(`ERR: HTTP_VERSION_UNSUPPORTED_OR_ILLEGAL recieved from "${proxyClient.remoteAddress}"; expected a HTTP/1.1 , but got something else`,`\nStopped at: "${requestLine}"\n`,{method,host,port,path,httpv});
             return proxyClient.write("ERR: UNSUPPORTED_HTTP_VER");
           }
           break;
         case "headers":
-          //...
+          //////
           break;
       }
     }
   });
   proxyClient.on("error", (err) => {
-    console.log("Client to proxy error");
+    console.log(`Error communicating with "${proxyClient.remoteAddress}", `+err.message);
   });
 
   proxyClient.once("close", () => {//app.once instead of on because of memory leak warning
-    console.log("Connection closed");
+    console.log(`Connection closed with "${proxyClient.remoteAddress}"`);
   });
 });
 
