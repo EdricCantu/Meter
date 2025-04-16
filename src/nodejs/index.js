@@ -65,6 +65,7 @@ app.on("connection", proxyClient => {
     var port = "";
     var path = "";
     var httpv = "";
+    var headers = [[]];
     var requestLine = "";
     var tokening = ["method"];
     for(const addr in data){
@@ -252,7 +253,19 @@ app.on("connection", proxyClient => {
                         console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 127.X.X.X is restricted`);
                         proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
                         return proxyClient.end();
-                      }else{//go on
+                      }else if(host[0] === "10"){
+                        console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 10.X.X.X is restricted`);
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                      }else if(host[0] === "192" && host[1] === "168"){
+                        console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 192.168.X.X is restricted`);
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                      }else if(host[0] === "172" && host[1] >= 16 && host[1] <= 31){
+                        console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 172.[16...31].X.X is restricted`);
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                      }else if(host[0] >= 224 && host[0] <= 239){//go on
+                        console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; [224...239].X.X.X is restricted`);
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                      }else{
                         tokening[1] = "port";
                       }
                     }else if(!tld.includes(host[host.length-1].toUpperCase())){ //not an IP, if TLD not publicly recognized:
@@ -357,7 +370,89 @@ app.on("connection", proxyClient => {
           }
           break;
         case "headers":
-          //////
+          switch(strb){
+            case  ":":
+              switch(headers[headers.length-1].length){
+                case 0:// colon at beginning of line
+                  console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected a header name, but went straight to value`);
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+                  return proxyClient.end();
+                  break;
+                case 1:// go on
+                headers[headers.length-1].push("");
+                  break;
+                case 2://too many colons, only one (two sections) allowed, attempting to add another
+                  console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expexted a key and value pair of a header, but got a mysterious third value`);
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+                  return proxyClient.end();
+                  break;
+              }
+              break;
+            case  " ":
+              switch(headers[headers.length-1].length){
+                case 0:// currently " (idek what to do with this)"         line starts on space
+                  console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected a header name, but header line began on space?????`);
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES UNKNOWN");
+                  break;
+                case 1://currently "HEADER (NAME: VALUE)" or "HEADER_NAME (:VALUE)", space within header name or space before colon.
+                  console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected a valid header name, but appears to contain a space or is terminated with padded space before a colon`);
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+                  break;
+                case 2:
+                  if(headers[headers.length-1][1] === ""){//currently "HEADER-NAME: " or "HEADER-NAME:  " or so on.
+                    //skip spaces after colon
+                  }else{//currently "HEADER-NAME: X " or "HEADER-NAME: YD E " or similar
+                    headers[headers.length-1][1] += " ";
+                  }
+                  break;
+              }
+            case "\r":
+              //ignore, \n likely next
+              break;
+            case "\n":
+              switch(headers[headers.length-1].length){
+                case 0:// empty line, making another empty line, indicating end of headers
+                  tokening = ['body'];
+                  break;
+                case 1://is (was)still setting the header name, but attempting to prematurely end the line;
+                  console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected a header name and value, but terminated line before getting to the value!`);
+                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+                  break;
+                case 2:
+                  if(headers[headers.length-1][1].length){//if value has content
+                    headers.push([]);
+                  }else{
+                    console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; got an empty header! Don't know what that's about...`)
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+                  }
+                  break;
+              }
+              break;
+            default:
+              switch(headers[headers.length-1].length){
+                case 0:// begin header name
+                  headers[headers.length-1].push("");
+                case 1://add to header name
+                  if("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~!#$&'()*+,/:;=?@[]".split("").includes(strb)){
+                    headers[headers.length-1][0] += strb;
+                  }else{
+                    console.warn(`ERR: HEADER_NAME_HAS_ILLEGAL_CHARACTER recieved from "${proxyClient.remoteAddress}"; expected a valid header name character , but got an unhandleable character`);
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: HEADER_ILLEGAL");
+                  }
+                  break;
+                case 2://add to header value
+                  if("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~!#$&'()*+,/:;=?@[]".split("").includes(strb)){// https://stackoverflow.com/questions/47687379/what-characters-are-allowed-in-http-header-values
+                    headers[headers.length-1][1] += strb;
+                  }else{
+                    console.warn(`ERR: HEADER_VALUE_HAS_ILLEGAL_CHARACTER recieved from "${proxyClient.remoteAddress}"; expected a valid header value character , but got an unhandleable character`);
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: HEADER_ILLEGAL");
+                  }
+                  break;
+              }
+              break;
+          }
+          break;
+        case "body":
           break;
       }
     }
