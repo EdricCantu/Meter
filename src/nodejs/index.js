@@ -145,7 +145,7 @@ app.on("connection", proxyClient => {
                     }else if(scheme.endsWith(":")){// x:/
                       scheme += "/";
                     }else if(scheme.endsWith(":/")){// scheme://(...)
-                      scheme = scheme.slice(-2);
+                      scheme = scheme.slice(0,-2);
                       tokening = ["url", "host"];;//triple slashes get handled by host handler
                     }else{//might not run
                       console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; I'm missing an edge case and i don't know what it is. I feel like this might never be seen on the terminal`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
@@ -612,6 +612,7 @@ app.on("connection", proxyClient => {
                       console.log(`${method} request for "${host}:${port+path}" over ${httpv}; ${headers.length} headers:`);
                       for(const i in headers) console.log(`--Header ${i}> ${headers[i][0]}: ${headers[i][1]}`);
                     //connect and start sending initial request
+                      if(!port) port = 80// for port === 0 (http://hostname.com:0/path) and port === "" (http://hostname.com/path) 
                       outbound = net.createConnection({host, port});
                       outbound.on('error', (err) => {
                         console.error(`Outbound connection error: ${err.message}`);
@@ -630,7 +631,7 @@ app.on("connection", proxyClient => {
                             break;
                           //case "ws": break;
                           default: 
-                            console.warn(`ERR: UNSUPPORTED_SCHEME recieved from "${proxyClient.remoteAddress}"; the scheme is invalid or we don't support it`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            console.warn(`ERR: UNSUPPORTED_SCHEME recieved from "${proxyClient.remoteAddress}"; the scheme is invalid or we don't support it`,`\nStopped at: \n"${request}"\n`,{scheme, method,host,port,path,httpv});
                             proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_SCHEME");
                             return proxyClient.end();
                           break;
