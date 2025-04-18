@@ -21,32 +21,41 @@
     }
   }
   console.log("Possible Private IPs:\n", results);
+
 var tld = [];
-// get cached TLDs
-  const buffer
-    = require('fs').readFileSync(
-        require('path').join(__dirname, '../tld')
-      );
-  
-  for(const byte of buffer){
-    const char = String.fromCharCode(byte);
-    if(!tld.length){
-      if(byte === 0x0A) tld.push("");//wait until newline to begin
+// get TLDs
+  const req = require("https").request({
+    method: "GET", host: "data.iana.org", port: 443, path: "/TLD/tlds-alpha-by-domain.txt"
+  }, (res) => {
+    if(res.statusCode === 200){
+      res.on('data', (chunk) => {
+        for(const byte of chunk){
+          const char = String.fromCharCode(byte);
+          if(!tld.length){
+            if(byte === 0x0A) tld.push("");//wait until newline to begin
+          }else{
+            if((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A) || (byte >= 0x30 && byte <= 0x39) || (byte === 0x2D)){
+           // ( ((   UPPER LATIN LETTER   ))  ||  ((   LOWER LATIN LETTER   ))  ||  ((   NUMBERS  /  DIGITS   ))  ||  (   MINUS   ) )
+              tld[tld.length - 1] += char;
+            }else if(byte === 0x0D){
+              //////////////////////
+            }else if(byte === 0x0A){
+              tld.push("")
+            }else{
+              throw("wtf");
+            }
+          }
+        }
+      });
+      res.on('end', begin)
     }else{
-      if((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A) || (byte >= 0x30 && byte <= 0x39) || (byte === 0x2D)){
-     // ( ((   UPPER LATIN LETTER   ))  ||  ((   LOWER LATIN LETTER   ))  ||  ((   NUMBERS  /  DIGITS   ))  ||  (   MINUS   ) )
-        tld[tld.length - 1] += char;
-      }else if(byte === 0x0D){
-        //////////////////////
-      }else if(byte === 0x0A){
-        tld.push("")
-      }else{
-        throw("nonothrow");
-      }
+      throw("wtf");
     }
-  }
+  });
+  req.on('error', e => console.error(`Problem with request: ${e.message}`) ); 
+  req.end();
 
-
+function begin(){
 const net = require("net");
 const app = net.createServer();
 
@@ -501,3 +510,4 @@ app.on("connection", proxyClient => {
 app.listen({ port: PORT }, () => {
   console.log("Server running on PORT:", PORT);
 });
+}
