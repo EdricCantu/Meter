@@ -3,27 +3,28 @@
 //to parse the minimal data into HTML, so
 //later less data is used
 
-//list interfaces
-  const nets = require("os").networkInterfaces();
-  const results = Object.create(null); // Or just '{}', an empty object
+// TODO:
+  // modify ALLOWLOCAL processing be specific to clients with creds,
+  // block [::] and [::1] when no ALLOWLOCAL priviledges, but need to figure out how to normalize them to whole IPv6
+  // allow custom methods
 
-  for (const name of Object.keys(nets)) {
-    for (const net of nets[name]) {
-      // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
-      // 'IPv4' is in Node <= 17, from 18 it's a number 4 or 6
-      const familyV4Value = typeof net.family === 'string' ? 'IPv4' : 4
-      if (net.family === familyV4Value && !net.internal) {
-        if (!results[name]) {
-          results[name] = [];
-        }
-        results[name].push(net.address);
-      }
-    }
-  }
-  console.log("Possible Private IPs:\n", results);
+const net = require("net");
 
-var tld = [];
-// get TLDs
+const srv  = net.createServer();
+  var PORT = process.env.PORT || 0;
+      srv.on("connection", onconnection);
+  var srvRedirect = false;
+const secsrv  = net.createServer();
+  var SECPORT = process.env.SECPORT || 0;
+      secsrv.on("connection", onconnection);
+  var secsrvTLSOnly = false;
+
+var tld = []; //allow underdashed hostnames and custom tlds (and in turn, likely, allow internal access)
+              // including the localhost tld, and allow certain IPs ([::], [::1], 0.0.0.0, 127.X.X.X) )
+if(["1","true"].includes(process.env.ALLOWLOCAL?.toString()?.toLowerCase())){
+  tld = null;
+  listen();//no need to get TLDs
+}else{//get TLDs
   const req = require("https").request({
     method: "GET", host: "data.iana.org", port: 443, path: "/TLD/tlds-alpha-by-domain.txt"
   }, (res) => {
@@ -47,23 +48,85 @@ var tld = [];
           }
         }
       });
-      res.on('end', begin)
+      res.on('end', listen)
     }else{
       throw("wtf");
     }
   });
   req.on('error', e => console.error(`Problem with request: ${e.message}`) ); 
   req.end();
+}
 
-function begin(){
-const net = require("net");
-const app = net.createServer();
+function listen(){
+  // in all instances of the word "upgrade",
+  // I mean "initiate an https redirect"
+  if(!PORT && !SECPORT){ PORT = 8080; console.log("No ports specified; Will run Insecure Server on PORT: ", PORT) }
+  if(PORT === SECPORT){
+    secsrv.listen(SECPORT, ()=>console.log("Unified Server running on PORT: ", SECPORT));
+    /* secsrv always responds to TLS, always handles plaintext by:
+      // * responds to plaintext normally OR
+     //  * upgrades from plaintext [to itself] (losing the point of being able to handle both)
+    */secsrvTLSOnly = false//in this case, secsrv responds to plaintext normally
+  }else if(PORT && SECPORT){
+    //srv options
+      /* srv always handles plaintext, never TLS (invalid plaintext); when plaintext, srv:
+        // * responds to plaintext normally OR
+       //  * upgrades from plaintext [to secsrv] 
+      */ srvRedirect = !!(Math.sign(PORT)-1) //(-1 -1)===-2==true, (1 -1)===0==false
+      PORT = Math.abs(PORT);
+    //secsrv options
+      /* secsrv always responds to TLS, always handles plaintext by:
+        // * responds to plaintext normally OR
+       //  * upgrades from plaintext [to itself]
+      */ secsrvTLSOnly = !!(Math.sign(SECPORT)-1) //(-1 -1)===-2==true, (1 -1)===0==false
+      SECPORT = Math.abs(SECPORT);
+    //init srv and secsrv
+      srv   .listen(   PORT, ()=>console.log("Insecure Server running on    PORT: ",    PORT));
+      secsrv.listen(SECPORT, ()=>console.log("+ Secure Server running on SECPORT: ", SECPORT));
+    /* all total options:
+       * srv responds normally  AND secsrv responds to TLS and plaintext both
+         * PORT, SECPORT
+       * srv responds normally  AND secsrv responds to TLS, and upgrades plaintext
+         * PORT, -SECPORT
+       * srv upgrades to secsrv AND secsrv responds to TLS, and upgrades plaintext (srv redirect????)
+         * -PORT, -SECPORT
+       - sounds odd for srv to require upgrade  BUT secsrv can respond to plaintext
+         * -PORT, SECPORT
+       */
+  }else if(PORT){
+    srv.listen(PORT, ()=>console.log("Insecure Server running on PORT: ", PORT));
+    /* srv always handles plaintext, never TLS (invalid plaintext); when plaintext, srv:
+      // * responds to plaintext normally OR
+     //  * upgrades from plaintext [to secsrv] (which doens't exist right now)
+    */srvRedirect = false//in this case, srv responds to plaintext normally
+    
+  }else if(SECPORT){
+    secsrv.listen(SECPORT, ()=>console.log("Secure Server running on SECPORT: ", SECPORT));
+    /* secsrv always responds to TLS, always handles plaintext by:
+      // * responds to plaintext normally OR (should use both PORT and SECPORT, with same number)
+     //  * upgrades from plaintext [to itself]
+    */secsrvTLSOnly = true//in this case, secsrv upgrades from plaintext
+  }
+  //list interfaces
+    const nets = require("os").networkInterfaces();
+    const results = Object.create(null); // Or just '{}', an empty object
 
-const PORT = process.env.PORT || 8080;
-///////////////////////////||
-var allowLocals = false; //||    allow underdashed hostnames and custom tlds (and in turn, likely, allow internal access), including localhost tld, and allow certain IPs ([::], [::1], 0.0.0.0, 127.X.X.X) )
-///////////////////////////||    to be implemented: modify to be specific to clients with creds, block [::] and [::1] but need to figure out how to normalize them to whole IPv6
-app.on("connection", proxyClient => {
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name]) {
+        // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
+        // 'IPv4' is in Node <= 17, from 18 it's a number 4 or 6
+        const familyV4Value = typeof net.family === 'string' ? 'IPv4' : 4
+        if (net.family === familyV4Value && !net.internal) {
+          if (!results[name]) {
+            results[name] = [];
+          }
+          results[name].push(net.address);
+        }
+      }
+    }
+    console.log("Possible Private IPs:\n", results);
+}
+function onconnection(proxyClient){
   console.log(`"${proxyClient.remoteAddress}" connected`);
   var method = "";
   var host = [""];
@@ -276,7 +339,7 @@ app.on("connection", proxyClient => {
                     hostlength++;
                   }
                 }else if(strb === "_"){
-                  if(allowLocals){
+                  if(!tld){
                     if(host[host.length-1].length == 63){//check label length
                       console.warn(`ERR: HOSTNAME_LABEL_TOO_LONG recieved from "${proxyClient.remoteAddress}"; expected port-delimiting colon but got another letter`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                       proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
@@ -304,7 +367,7 @@ app.on("connection", proxyClient => {
                     proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
                     return proxyClient.end();
                   }else{
-                    if(!allowLocals){
+                    if(tld){
                       if(
                         host.length === 4 
                           && 
@@ -360,7 +423,7 @@ app.on("connection", proxyClient => {
                       proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
                       return proxyClient.end();
                     }else{
-                      if(!allowLocals){
+                      if(tld){
                         if(
                           host.length === 4 
                             && 
@@ -425,7 +488,7 @@ app.on("connection", proxyClient => {
                       proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
                       return proxyClient.end();
                     }else{
-                      if(!allowLocals){
+                      if(tld){
                         if(
                           host.length === 4 
                             && 
@@ -612,16 +675,30 @@ app.on("connection", proxyClient => {
                       console.log(`${method} request for "${host}:${port+path}" over ${httpv}; ${headers.length} headers:`);
                       for(const i in headers) console.log(`--Header ${i}> ${headers[i][0]}: ${headers[i][1]}`);
                     //connect and start sending initial request
-                      if(!port) port = 80// for port === 0 (http://hostname.com:0/path) and port === "" (http://hostname.com/path) 
-                      outbound = net.createConnection({host, port});
-                      outbound.on('error', (err) => {
-                        console.error(`Outbound connection error: ${err.message}`);
-                        proxyClient.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
-                      });
-                      outbound.on("close", ()=>proxyClient.end())
-                      outbound.pipe(proxyClient);//pipe outbound to client
-                      if(method !== "CONNECT"){//send request, body later
-                        //check if scheme supported
+                      //check if scheme supported
+                        if(method !== "CONNECT"){
+                          switch(scheme){
+                            case "http":
+                              if(!port) port = 80;// for port === 0 (http://hostname.com:0/path) and port === "" (http://hostname.com/path)
+                              break;
+                            //case "ws": break;
+                            default: 
+                              console.warn(`ERR: UNSUPPORTED_SCHEME recieved from "${proxyClient.remoteAddress}"; the scheme is invalid or we don't support it`,`\nStopped at: \n"${request}"\n`,{scheme, method,host,port,path,httpv});
+                              proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_SCHEME");
+                              return proxyClient.end();
+                            break;
+                          }
+                        }
+                      //start outbound connection
+                        outbound = net.createConnection({host, port});
+                        outbound.on('error', (err) => {
+                          console.error(`Outbound connection error: ${err.message}`);
+                          proxyClient.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+                        });
+                        outbound.on("close", ()=>proxyClient.end())
+                        outbound.pipe(proxyClient);//pipe outbound to client
+                      //send initial response / request
+                      if(method !== "CONNECT"){
                         switch(scheme){
                           case "http":
                             console.log("sending outbound: ",`${method} ${path} ${httpv}\r\n`);
@@ -697,10 +774,4 @@ app.on("connection", proxyClient => {
     console.log(`"${proxyClient.remoteAddress}" closed connection`);
     if(outbound) outbound.end();
   });
-});
-
-
-app.listen({ port: PORT }, () => {
-  console.log("Server running on PORT:", PORT);
-});
 }
