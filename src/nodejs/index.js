@@ -76,6 +76,7 @@ app.on("connection", proxyClient => {
   var request = "";
   var tokening = ["method"];
   var outbound = null;
+  var scheme = null;
   proxyClient.on("data", data=>{
     if(tokening[0] === "body"){
       outbound.write(data);//"pipe" client to outbound
@@ -111,11 +112,51 @@ app.on("connection", proxyClient => {
                 return proxyClient.end();
               }
               //passed all checks, move on to url
-              tokening = ["url","host"];
+              if(method === "CONNECT"){
+                tokening = ["url","host"];
+              }else{
+                scheme = "";
+                tokening = ["url","scheme"];
+              }
             }
             break;
           case "url":
             switch(tokening[1]){
+              case "scheme":
+                if(scheme.includes(":")){
+                  if(strb === "/"){
+                    scheme += "/"
+                    if(scheme.endsWith("://")){//permit "http://abc"
+                      scheme = scheme.slice(0,-3);
+                      tokening = ["url", "host"];//triple slashes get handled by host handler
+                    }
+                  }else if((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)){//permit "http:abc"
+                    scheme = scheme.slice(0,-1);
+                    tokening = ["url","host"];
+                    addr--;//go back to this byte
+                  }{//bad scheme, like https:/ok and https::ok
+                    console.warn(`ERR: SCHEME_WEIRD recieved from "${proxyClient.remoteAddress}"; the scheme is weird`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: SCHEME_WEIRD");
+                    return proxyClient.end();
+                  }
+                }else{
+                  if((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)){
+                    if(scheme.length === 20){//no more than 20
+                      console.warn(`ERR: SCHEME_LONG recieved from "${proxyClient.remoteAddress}"; the scheme is more than 20 characters`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: SCHEME_LONG");
+                      return proxyClient.end();
+                    }else{
+                      scheme += strb;
+                    }
+                  }else if(strb === ":"){
+                    scheme += ":";
+                  }else{
+                    console.warn(`ERR: SCHEME_ILLEGAL recieved from "${proxyClient.remoteAddress}"; the scheme contains an invalid character`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: SCHEME_ILLEGAL");
+                    return proxyClient.end();
+                  }
+                }
+                break;
               case "host":
                 if(host[0] === "["){//handle IPv6 separately
                   if("0123456789ABCDEFabcdef".split("").includes(strb)){
@@ -292,15 +333,130 @@ app.on("connection", proxyClient => {
                     }
                   }
                 }else if(strb === " "){
-                  console.warn(`ERR: PREMATURE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected more information but recieved ending marker (SPACE, " ", 0x20) for url`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
-                  proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_URL");
-                  return proxyClient.end();
+                  if(scheme){//scheme means no port (or path) necessary
+                    if(host[host.length-1] == ""){//check if "." before ":"
+                      console.warn(`ERR: EMPTY_HOSTNAME_LABEL recieved from "${proxyClient.remoteAddress}"; expected another label but got "."`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                      return proxyClient.end();
+                    }else if(host[host.length-1].endsWith("-")){//check if "-" before ":", if ending in dash
+                      console.warn(`ERR: HOSTNAME_LABEL_END_IN_DASH recieved from "${proxyClient.remoteAddress}"; expected completion of label but got "."`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                      return proxyClient.end();
+                    }else{
+                      if(!allowLocals){
+                        if(
+                          host.length === 4 
+                            && 
+                          host.reduce(
+                            (acc,add)=>(
+                              acc && (((/^\d{1,3}$/.test(add))?parseInt(add):256) < 256)
+                            ),
+                            true
+                          ) 
+                        ){//if IP
+                          if(host[0] === "0" && host[1] === "0" && host[2] === "0" && host[3] === "0"){
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 0.0.0.0 is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                            return proxyClient.end();
+                          }else if(host[0] === "127"){
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 127.X.X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                            return proxyClient.end();
+                          }else if(host[0] === "10"){
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 10.X.X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                          }else if(host[0] === "192" && host[1] === "168"){
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 192.168.X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                          }else if(host[0] === "172" && host[1] >= 16 && host[1] <= 31){
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 172.[16...31].X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                          }else if(host[0] >= 224 && host[0] <= 239){//go on
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; [224...239].X.X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                          }else{
+                            tokening[1] = "httpv";
+                          }
+                        }else if(!tld.includes(host[host.length-1].toUpperCase())){ //not an IP, if TLD not publicly recognized:
+                          console.warn(`ERR: UNSUPPORTED_HOSTNAME recieved from "${proxyClient.remoteAddress}"; TLD isn't recognized: "${host[host.length-1]}"`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                          proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                          return proxyClient.end();
+                        }else{//go on
+                          tokening[1] = "httpv";
+                        }
+                      }else{//who cares
+                        tokening[1] = "httpv";
+                      }
+                    }
+                  }else{
+                    console.warn(`ERR: PREMATURE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected more information but recieved ending marker (SPACE, " ", 0x20) for url`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_URL");
+                    return proxyClient.end();
+                  }
                 }else if(strb === "/"){
                   if(host[0] === ""){//<METHOD> (???)/<pathname> <httpv>
                     console.warn(`ERR: PROXY_CLIENTS_ONLY recieved from "${proxyClient.remoteAddress}"; recieved a move to a pathname (SOLIDUS, "/", 0x2F) from the beginning, but only HTTP servers handle that!`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                     proxyClient.write("HTTP/1.1 418 I'm a proxy\n\nI'm a proxy!");
                     return proxyClient.end();
-                  }else{
+                  }else if(scheme){//portless hostname because of scheme
+                    if(host[host.length-1] == ""){//check if "." before ":"
+                      console.warn(`ERR: EMPTY_HOSTNAME_LABEL recieved from "${proxyClient.remoteAddress}"; expected another label but got "."`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                      return proxyClient.end();
+                    }else if(host[host.length-1].endsWith("-")){//check if "-" before ":", if ending in dash
+                      console.warn(`ERR: HOSTNAME_LABEL_END_IN_DASH recieved from "${proxyClient.remoteAddress}"; expected completion of label but got "."`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                      return proxyClient.end();
+                    }else{
+                      if(!allowLocals){
+                        if(
+                          host.length === 4 
+                            && 
+                          host.reduce(
+                            (acc,add)=>(
+                              acc && (((/^\d{1,3}$/.test(add))?parseInt(add):256) < 256)
+                            ),
+                            true
+                          ) 
+                        ){//if IP
+                          if(host[0] === "0" && host[1] === "0" && host[2] === "0" && host[3] === "0"){
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 0.0.0.0 is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                            return proxyClient.end();
+                          }else if(host[0] === "127"){
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 127.X.X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                            return proxyClient.end();
+                          }else if(host[0] === "10"){
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 10.X.X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                          }else if(host[0] === "192" && host[1] === "168"){
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 192.168.X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                          }else if(host[0] === "172" && host[1] >= 16 && host[1] <= 31){
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 172.[16...31].X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                          }else if(host[0] >= 224 && host[0] <= 239){//go on
+                            console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; [224...239].X.X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                          }else{
+                            tokening[1] = "path";
+                            path += "/"
+                          }
+                        }else if(!tld.includes(host[host.length-1].toUpperCase())){ //not an IP, if TLD not publicly recognized:
+                          console.warn(`ERR: UNSUPPORTED_HOSTNAME recieved from "${proxyClient.remoteAddress}"; TLD isn't recognized: "${host[host.length-1]}"`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                          proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
+                          return proxyClient.end();
+                        }else{//go on
+                          tokening[1] = "path";
+                          path += "/"
+                        }
+                      }else{//who cares
+                        tokening[1] = "path";
+                        path += "/"
+                      }
+                    }
+                  }else{//
                     console.warn(`ERR: PORT_REQUIRED recieved from "${proxyClient.remoteAddress}"; recieved a move to a pathname (SOLIDUS, "/", 0x2F) instead of a port, but proxies require ports`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                     proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PORT_REQUIRED");
                     return proxyClient.end();
@@ -310,7 +466,6 @@ app.on("connection", proxyClient => {
                   proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_HOSTNAME");
                   return proxyClient.end();
                 }
-                
                 break;
               case "port":
                 if((byte >= 0x30 && byte <= 0x39)){
@@ -324,11 +479,19 @@ app.on("connection", proxyClient => {
                     return proxyClient.end();
                   }
                 }else if(strb === "/"){
-                  port = parseInt(port);
-                  tokening[1] = "path";
-                  path += "/";
+                  if(method !== "CONNECT"){
+                    port = parseInt(port);
+                    tokening[1] = "path";
+                    path += "/";
+                  }else{
+                    console.warn(`ERR: PATH_UNAVAILABLE recieved from "${proxyClient.remoteAddress}"; CONNECT tunnel attempted to set a path`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PATH_UNAVAILABLE");
+                    return proxyClient.end();
+                  }
                 }else if(strb === " "){
                   if(method === "CONNECT"){//CONNECT abc.xyz:123 HTTP/1.1
+                    tokening = ["httpv"];
+                  }else if(scheme){//scheme permits pathlessness
                     tokening = ["httpv"];
                   }else{
                     console.warn(`ERR: PREMATURE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected more information but recieved ending marker (SPACE, " ", 0x20) for url`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
@@ -404,10 +567,12 @@ app.on("connection", proxyClient => {
                   case 0:// currently " (idek what to do with this)"         line starts on space
                     console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected a header name, but header line began on space?????`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                     proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES UNKNOWN");
+                    return proxyClient.end();
                     break;
                   case 1://currently "HEADER (NAME: VALUE)" or "HEADER_NAME (:VALUE)", space within header name or space before colon.
                     console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expected a valid header name, but appears to contain a space or is terminated with padded space before a colon`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                     proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+                    return proxyClient.end();
                     break;
                   case 2:
                     if(headers[headers.length-1][1] === ""){//currently "HEADER-NAME: " or "HEADER-NAME:  " or so on.
@@ -438,14 +603,24 @@ app.on("connection", proxyClient => {
                       outbound.on("close", ()=>proxyClient.end())
                       outbound.pipe(proxyClient);//pipe outbound to client
                       if(method !== "CONNECT"){//send request, body later
-                        
-                        console.log("sending outbound: ",`${method} ${path} ${httpv}\r\n`);
-                        outbound.write(`${method} ${path} ${httpv}\r\n`);
-                        for(const header of headers) outbound.write(`${header[0]}: ${header[1]}\r\n`);
-                        outbound.write("\r\n");
+                        //check if scheme supported
+                        switch(scheme){
+                          case "http":
+                            console.log("sending outbound: ",`${method} ${path} ${httpv}\r\n`);
+                            outbound.write(`${method} ${path} ${httpv}\r\n`);
+                            for(const header of headers) outbound.write(`${header[0]}: ${header[1]}\r\n`);
+                            outbound.write("\r\n");
+                            break;
+                          //case "ws": break;
+                          default: 
+                            console.warn(`ERR: UNSUPPORTED_SCHEME recieved from "${proxyClient.remoteAddress}"; the scheme is invalid or we don't support it`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                            proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: UNSUPPORTED_SCHEME");
+                            return proxyClient.end();
+                          break;
+                        }
                       }else{
                         proxyClient.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-                        //everything in body (i think)
+                        //everything in body (i think), which will happen later
                       }
                     tokening = ['body', addr+1]; //currently REQUESTLINE\r\nHEADER: VALUE\r\nHEADER: VALUE\r\n\r\n
                                                  //                                                                 @ index 54. next is index 55, so set 54+1, for proper slicing
