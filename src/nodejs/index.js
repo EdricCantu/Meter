@@ -452,6 +452,9 @@ app.on("connection", proxyClient => {
           }
           break;
         case "body":
+          console.log(`${method} request for "${host.join(   (host[0] === '[')?(":"):("."))}:${port+path}" over ${httpv}; ${headers.length} headers:`);
+          for(x of headers) console.log(x[0]+": "+x[1]);
+          //determine whether or not a request body is allowed for the method
           break;
       }
     }
@@ -460,7 +463,7 @@ app.on("connection", proxyClient => {
     console.log(`Error communicating with "${proxyClient.remoteAddress}", `+err.message);
   });
 
-  proxyClient.once("close", () => {//app.once instead of on because of memory leak warning
+  proxyClient.once("close", () => {
     console.log(`Connection closed with "${proxyClient.remoteAddress}"`);
   });
 });
