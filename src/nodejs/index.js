@@ -129,7 +129,7 @@ app.on("connection", proxyClient => {
                       console.warn(`ERR: SCHEME_NOT_GIVEN recieved from "${proxyClient.remoteAddress}"; why does the URL start in a colon?`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                       proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
                       return proxyClient.end();
-                    }else if(!scheme.includes(":")){//  x::   x:/: 
+                    }else if(scheme.includes(":")){//  x::   x:/: 
                       console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; extra colon in scheme space`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                       proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
                       return proxyClient.end();//"What am i supposed to do with this?"
