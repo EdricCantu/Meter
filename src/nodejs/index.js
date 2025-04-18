@@ -3,31 +3,33 @@
 //to parse the minimal data into HTML, so
 //later less data is used
 
-// TODO:
-  // modify ALLOWLOCAL processing be specific to clients with creds,
-  // block [::] and [::1] when no ALLOWLOCAL priviledges, but need to figure out how to normalize them to whole IPv6
-  // allow custom methods
-
+// TODO: block [::] and [::1] when no ALLOWLOCAL priviledges, but need to figure out how to normalize them to whole IPv6
 const net = require("net");
-
+const tls = require("tls");
+const fs = require("fs");
 const srv  = net.createServer();
   var PORT = process.env.PORT || 0;
       srv.on("connection", onconnection);
-  var srvRedirect = false;
+  var srvRedirect = false; 
 const secsrv  = net.createServer();
   var SECPORT = process.env.SECPORT || 0;
       secsrv.on("connection", onconnection);
+  var HOST    = process.env.HOST;
+  var SECKEY  = process.env.SECKEY;
+  var SECCRT  = process.env.SECCRT;
   var secsrvTLSOnly = false;
-
 var tld = []; //allow underdashed hostnames and custom tlds (and in turn, likely, allow internal access)
               // including the localhost tld, and allow certain IPs ([::], [::1], 0.0.0.0, 127.X.X.X) )
 if(["1","true"].includes(process.env.ALLOWLOCAL?.toString()?.toLowerCase())){
+  //TODO: modify ALLOWLOCAL processing be specific to clients with creds
   tld = null;
+  console.log("The environment variable $ALLOWLOCAL is 1, or true.");
+  console.log("Connections to 127.X.X.X, 192.168.X.X, 100.X.X.X [::1], and [::]");
   listen();//no need to get TLDs
 }else{//get TLDs
-  const req = require("https").request({
-    method: "GET", host: "data.iana.org", port: 443, path: "/TLD/tlds-alpha-by-domain.txt"
-  }, (res) => {
+  console.log("The environment variable $ALLOWLOCAL is 0, false, or not set.");
+  console.log("Fetching TLDs from data.iana.org to restrict hostnames...");
+  const req = require("https").get("https://data.iana.org/TLD/tlds-alpha-by-domain.txt", (res) => {
     if(res.statusCode === 200){
       res.on('data', (chunk) => {
         for(const byte of chunk){
@@ -43,24 +45,132 @@ if(["1","true"].includes(process.env.ALLOWLOCAL?.toString()?.toLowerCase())){
             }else if(byte === 0x0A){
               tld.push("")
             }else{
+              console.error("Is IANA down? Something weird happened, found a byte, "+byte);
               throw("wtf");
             }
           }
         }
       });
-      res.on('end', listen)
+      res.on('end', ()=>{ console.log("Done getting TLDs!"); listen() })
     }else{
+      console.error("Is IANA down? Status "+res.statusCode);
       throw("wtf");
     }
   });
-  req.on('error', e => console.error(`Problem with request: ${e.message}`) ); 
+  req.on('error', err=>{
+    console.error(`Problem fetching TLDs. This is likely a result of bad internet :(`);
+    console.error("If you Still need an error, knock yourself out:", err);
+    throw("wtf");
+  }); 
   req.end();
 }
-
+var tlsOptions = null;
 function listen(){
+  //find all IPs
+    const nets = require("os").networkInterfaces();
+    const results = Object.create(null); // Or just '{}', an empty object
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name]) {
+        // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
+        // 'IPv4' is in Node <= 17, from 18 it's a number 4 or 6
+        const familyV4Value = typeof net.family === 'string' ? 'IPv4' : 4
+        if (net.family === familyV4Value && !net.internal) {
+          if (!results[name]) {
+            results[name] = [];
+          }
+          results[name].push(net.address);
+        }
+      }
+    }
   // in all instances of the word "upgrade",
   // I mean "initiate an https redirect"
-  if(!PORT && !SECPORT){ PORT = 8080; console.log("No ports specified; Will run Insecure Server on PORT: ", PORT) }
+
+  if(!PORT && !SECPORT){ PORT = 8080; console.warn("No ports specified; Will run Insecure Server on PORT: ", PORT) }
+  
+  if(SECPORT){//manage environment variables required when using a secure server
+    //manage redirection host
+      if(!HOST){
+        function guessHost(){
+          console.warn("In this case, setting the $HOST environment variable is recommended");
+          console.warn("-- to define where redirects should go to.");
+          console.warn("Since it isn't, I need to guess based on available IP interfaces.");
+          console.warn("Since this is unsafe, I will avoid public IP addresses.");
+          if(!Object.keys(nets).length){
+            console.warn("No available private IPs were found!");
+            console.warn("-- Using 127.0.0.1 as fallback");
+            HOST = "127.0.0.1";
+          }else{
+            const key = Object.keys(nets)[0];
+            console.warn("First interface found is "+key);
+            HOST = nets[key];
+          }
+          console.warn("-- HOST is inferred to be "+HOST);
+          console.warn();
+        }
+        if(PORT){
+          if((Math.sign(SECPORT) == -1) || (Math.sign(PORT) == -1)){
+            console.warn("The Server is set to redirect away from insecure connections,");
+            if((Math.sign(SECPORT) == -1) && (Math.sign(PORT) == -1)){
+              console.warn("-- when connecting to the Secure Server (SECPORT: "+Math.abs(SECPORT)+")");
+              console.warn("-- or connecting to the Insecure Server (at PORT: "+Math.abs(SECPORT)+")");
+            }else if(Math.sign(SECPORT) == -1){
+              console.warn("-- when connecting to the Secure Server (SECPORT: "+Math.abs(SECPORT)+")");
+            }else if(Math.sign(PORT) == -1){
+              console.warn("-- when connecting to the Insecure Server (PORT: "+Math.abs(SECPORT)+")");
+            }
+            guessHost();
+          }
+        }else{
+          console.warn("The Server is automatically set to redirect away from insecure connections,");
+          console.warn("-- when connecting to the Secure Server (SECPORT: "+Math.abs(SECPORT)+")")
+          guessHost();
+        }
+      }
+    //manage TLS key and certificate
+      if(SECKEY && SECCRT){
+        const existsSECKEY = fs.existsSync(SECKEY);
+        const existsSECCRT = fs.existsSync(SECCRT);
+        if(existsSECKEY && existsSECCRT){
+          tlsOptions = {
+            key: fs.readFileSync(SECKEY),
+            cert: fs.readFileSync(SECCRT)
+          };
+          //attempt to create a secure context
+            try{
+              tls.createSecureContext(tlsOptions);//TODO: can this be reused?
+            } catch (err) {
+              console.error("One of the files referenced by $SECKEY or $SECCRT are of an invalid format for the purpose expected!");
+              console.error("-- The file referenced by $SECKEY should be a valid PEM private key file (.pem, .key)");//TODO: be specific
+              console.error("-- The file referenced by $SECCRT should be a valid PEM certificate file (.pem, .crt, .cert)");//TODO: be specific
+              console.error("\nBUT: It's also possible something else happened. Heres the error if you want:\n", err)
+              throw("wtf");
+            }
+        }else if(existsSECKEY){
+          console.error("The environment variable $SECCRT is invalid!");
+          console.error("-- The file referenced by it doesn't exist!");
+          throw("wtf");
+        }else if(existsSECCRT){
+          console.error("The environment variable $SECKEY is invalid!");
+          console.error("-- The file referenced by it doesn't exist!");
+          throw("wtf");
+        }else{
+          console.error("The environment variables SECKEY and SECCRT appear invalid!");
+          console.error("-- The files referenced by neither $SECKEY nor $SECCRT exist!");
+          throw("wtf");
+        }
+      }else{//one or both is missing
+        if(SECKEY || SECCRT)
+          console.error(`The $${SECKEY?"SECCRT":"SECKEY"} environment variable has not been set!`);
+        else
+          console.error(`The $SECKEY and $SECCRT environment variables have not been set!`);
+        console.error("Environment variables $SECKEY and $SECCRT must be set when running a Secure Server.");
+        console.error("By using $SECPORT, you are attempting to run a Secure Server that uses TLS over TCP.");
+        console.error("By running a Server that utilizes TLS,")
+        console.error("-- you require a valid PEM private key file (.pem, .key) and PEM certificate file (.pem, .crt, .cert)");
+        console.error("-- defined by setting both said environment variables.")
+        throw("wtf");
+      }
+  }
   if(PORT === SECPORT){
     secsrv.listen(SECPORT, ()=>console.log("Unified Server running on PORT: ", SECPORT));
     /* secsrv always responds to TLS, always handles plaintext by:
@@ -108,26 +218,53 @@ function listen(){
     */secsrvTLSOnly = true//in this case, secsrv upgrades from plaintext
   }
   //list interfaces
-    const nets = require("os").networkInterfaces();
-    const results = Object.create(null); // Or just '{}', an empty object
-
-    for (const name of Object.keys(nets)) {
-      for (const net of nets[name]) {
-        // Skip over non-IPv4 and internal (i.e. 127.0.0.1) addresses
-        // 'IPv4' is in Node <= 17, from 18 it's a number 4 or 6
-        const familyV4Value = typeof net.family === 'string' ? 'IPv4' : 4
-        if (net.family === familyV4Value && !net.internal) {
-          if (!results[name]) {
-            results[name] = [];
-          }
-          results[name].push(net.address);
-        }
-      }
-    }
     console.log("Possible Private IPs:\n", results);
+    //TODO: add public IPs
 }
 function onconnection(proxyClient){
   console.log(`"${proxyClient.remoteAddress}" connected`);
+  if(this === srv){//connection to srv
+    if(srvRedirect){//redirect to secure port
+      proxyClient.end(`HTTP/1.1 301 HTTPS Enforced\nLocation: https://${HOST}:${SECPORT}`);
+    }else{//handle in plaintext
+      proxyClient.on("data", dataHandler);
+    }
+  }else{//connection to secsrv
+    proxyClient.once("data", tlsPacket=>{
+      if(tlsPacket[0] !== 0x16){//plaintext, likely
+        if(secsrvTLSOnly){//redirect to secure port
+          proxyClient.end(`HTTP/1.1 301 HTTPS Enforced\nLocation: https://${HOST}:${SECPORT}`);
+        }else{//handle in plaintext
+          proxyClient.unshift(tlsPacket);
+          proxyClient.on("data", dataHandler);
+          proxyClient.on("error", (err) => {
+            console.log(`"${proxyClient.remoteAddress}" had an error in communication: `+err.message);
+          });
+          proxyClient.once("close", () => {
+            console.log(`"${proxyClient.remoteAddress}" closed connection`);
+            if(outbound) outbound.end();
+          });
+        }
+      }else{//TLS attempted
+        const secureSocket = new tls.TLSSocket(proxyClient, {
+          isServer: true,
+          secureContext: tls.createSecureContext(tlsOptions)
+        });
+        secureSocket.unshift(tlsPacket);
+        secureSocket.on('secureConnect', () => {
+          
+        });
+        secureSocket.on('data', dataHandler);
+        secureSocket.on("error", (err) => {
+          console.log(`"${proxyClient.remoteAddress}" had an error in communication: `+err.message);
+        });
+        secureSocket.once("close", () => {
+          console.log(`"${proxyClient.remoteAddress}" closed connection`);
+          if(outbound) outbound.end();
+        });
+      }
+    });
+  }
   var method = "";
   var host = [""];
     var zeroGroupUsed = false;
@@ -140,7 +277,7 @@ function onconnection(proxyClient){
   var tokening = ["method"];
   var outbound = null;
   var scheme = null;
-  proxyClient.on("data", data=>{
+  function dataHandler(data){
     if(tokening[0] === "body"){
       outbound.write(data);//"pipe" client to outbound
     }else{
@@ -149,7 +286,7 @@ function onconnection(proxyClient){
         const strb = String.fromCharCode(byte);
         request += strb;
         switch(tokening[0]){
-          case "method"://to be implemented: nonstandard methods
+          case "method"://TODO: nonstandard methods (need to drive away too long methods, mostly)
             if ((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)) {
               // ( ((   UPPER LATIN LETTER   ))  ||  ((   LOWER LATIN LETTER   )) )
               method += strb.toUpperCase();
@@ -217,7 +354,7 @@ function onconnection(proxyClient){
                     }
                     break;
                   default:
-                    if((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)){
+                    if((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A) || (byte >= 0x30 && byte <= 0x39)){
                       if(!scheme.includes(":")){//still in scheme
                         scheme += strb;
                       }else if(scheme.endsWith(":")){// scheme:url
@@ -225,8 +362,25 @@ function onconnection(proxyClient){
                         tokening = ["url","host"];
                         addr--;//go back to this byte from host handler
                       }else if(scheme.endsWith(":/")){//like scheme:/url
-                        console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; Schemes don't look like that, silly!`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                        console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; Schemes don't have single slashes before a hostname!`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+                        return proxyClient.end();//"What am i supposed to do with this?"
+                      }else{//might not run
+                        console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; I'm missing an edge case and i don't know what it is. I feel like this might never be seen on the terminal`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                         proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: who knows, not me :S");
+                        return proxyClient.end();//"What am i supposed to do with this?"
+                      }
+                    }else if(strb === "["){//include IPv6 addresses
+                      if(!scheme.includes(":")){//still in scheme
+                        console.warn(`ERR: SCHEME_ILLEGAL recieved from "${proxyClient.remoteAddress}"; Schemes don't have brackets, silly!`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+                      }else if(scheme.endsWith(":")){// scheme:url
+                        scheme = scheme.slice(0,-1);
+                        tokening = ["url","host"];
+                        addr--;//go back to this byte from host handler
+                      }else if(scheme.endsWith(":/")){//like scheme:/url
+                        console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; Schemes don't have single slashes before a hostname!`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
                         return proxyClient.end();//"What am i supposed to do with this?"
                       }else{//might not run
                         console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; I'm missing an edge case and i don't know what it is. I feel like this might never be seen on the terminal`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
@@ -765,13 +919,5 @@ function onconnection(proxyClient){
         }
       }
     }
-  });
-  proxyClient.on("error", (err) => {
-    console.log(`"${proxyClient.remoteAddress}" had an error in communication: `+err.message);
-  });
-
-  proxyClient.once("close", () => {
-    console.log(`"${proxyClient.remoteAddress}" closed connection`);
-    if(outbound) outbound.end();
-  });
+  }
 }
