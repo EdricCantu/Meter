@@ -28,7 +28,9 @@ if(["1","true"].includes(process.env.ALLOWLOCAL?.toString()?.toLowerCase())){
   listen();//no need to get TLDs
 }else{//get TLDs
   console.log("The environment variable $ALLOWLOCAL is 0, false, or not set.");
-  console.log("Fetching TLDs from data.iana.org to restrict hostnames...");
+  console.log("Connections to private IPs and hostnames,");
+  console.log("-- Like 127.X.X.X, 192.168.X.X, 100.X.X.X [::1], and [::]");
+  console.log("Will be blocked!")
   const req = require("https").get("https://data.iana.org/TLD/tlds-alpha-by-domain.txt", (res) => {
     if(res.statusCode === 200){
       res.on('data', (chunk) => {
