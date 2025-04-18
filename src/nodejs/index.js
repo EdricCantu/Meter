@@ -56,18 +56,17 @@ var allowLocals = false; //||    allow underdashed hostnames and custom tlds (an
 ///////////////////////////||    to be implemented: modify to be specific to clients with creds, block [::] and [::1] but need to figure out how to normalize them to whole IPv6
 app.on("connection", proxyClient => {
   console.log("Someone connected to the Proxy!");
-
-  proxyClient.once("data", data => {//to be implemented: broken packets
-    var method = "";
-    var host = [""];
-      var zeroGroupUsed = false;
-     var hostlength = 0;
-    var port = "";
-    var path = "";
-    var httpv = "";
-    var headers = [[]];
-    var requestLine = "";
-    var tokening = ["method"];
+  var method = "";
+  var host = [""];
+    var zeroGroupUsed = false;
+   var hostlength = 0;
+  var port = "";
+  var path = "";
+  var httpv = "";
+  var headers = [[]];
+  var requestLine = "";
+  var tokening = ["method"];
+  proxyClient.on("data", data => {//to be implemented: broken packets
     for(const addr in data){
       const byte = data[addr];
       const strb = String.fromCharCode(byte);
