@@ -55,7 +55,7 @@ const PORT = process.env.PORT || 8080;
 var allowLocals = false; //||    allow underdashed hostnames and custom tlds (and in turn, likely, allow internal access), including localhost tld, and allow certain IPs ([::], [::1], 0.0.0.0, 127.X.X.X) )
 ///////////////////////////||    to be implemented: modify to be specific to clients with creds, block [::] and [::1] but need to figure out how to normalize them to whole IPv6
 app.on("connection", proxyClient => {
-  console.log("Someone connected to the Proxy!");
+  console.log(`"${proxyClient.remoteAddress}" connected`);
   var method = "";
   var host = [""];
     var zeroGroupUsed = false;
@@ -71,7 +71,7 @@ app.on("connection", proxyClient => {
     if(tokening[0] === "body"){
       outbound.write(data);//"pipe" client to outbound
     }else{
-      loop: for(const addr in data){
+      loop: for(let addr = 0; addr < data.length; addr++){//what the hell why is addr always === "readBigUInt64LE", how has byte or strb not been broken yet
         const byte = data[addr];
         const strb = String.fromCharCode(byte);
         request += strb;
@@ -317,6 +317,7 @@ app.on("connection", proxyClient => {
                 }else if(strb === "/"){
                   port = parseInt(port);
                   tokening[1] = "path";
+                  path += "/";
                 }else if(strb === " "){
                   if(method === "CONNECT"){//CONNECT abc.xyz:123 HTTP/1.1
                     tokening = ["httpv"];
@@ -414,18 +415,27 @@ app.on("connection", proxyClient => {
               case "\n":
                 switch(headers[headers.length-1].length){
                   case 0:// empty line, making another empty line, indicating end of headers
+                    headers.pop(); //remove empty header
                     host = host.join(   (host[0] === '[')?(":"):("."));
                     //logging
                       console.log(`${method} request for "${host}:${port+path}" over ${httpv}; ${headers.length} headers:`);
-                      for(x of headers) console.log(x[0]+": "+x[1]);
+                      for(const i in headers) console.log(`--Header ${i}> ${headers[i][0]}: ${headers[i][1]}`);
                     //connect and start sending initial request
                       outbound = net.createConnection({host, port});
+                      outbound.on('error', (err) => {
+                        console.error(`Outbound connection error: ${err.message}`);
+                        proxyClient.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+                      });
+                      outbound.on("close", ()=>proxyClient.end())
                       outbound.pipe(proxyClient);//pipe outbound to client
                       if(method !== "connect"){//send request, body later
+                        
+                        console.log("sending outbound: ",`${method} ${path} ${httpv}\r\n`);
                         outbound.write(`${method} ${path} ${httpv}\r\n`);
                         for(const header of headers) outbound.write(`${header[0]}: ${header[1]}\r\n`);
                         outbound.write("\r\n");
                       }else{
+                        proxyClient.write('HTTP/1.1 200 Connection Established\r\n\r\n');
                         //everything in body (i think)
                       }
                     tokening = ['body', addr+1]; //currently REQUESTLINE\r\nHEADER: VALUE\r\nHEADER: VALUE\r\n\r\n
@@ -478,11 +488,12 @@ app.on("connection", proxyClient => {
     }
   });
   proxyClient.on("error", (err) => {
-    console.log(`Error communicating with "${proxyClient.remoteAddress}", `+err.message);
+    console.log(`"${proxyClient.remoteAddress}" had an error in communication: `+err.message);
   });
 
   proxyClient.once("close", () => {
-    console.log(`Connection closed with "${proxyClient.remoteAddress}"`);
+    console.log(`"${proxyClient.remoteAddress}" closed connection`);
+    if(outbound) outbound.end();
   });
 });
 
