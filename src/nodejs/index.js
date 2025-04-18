@@ -378,12 +378,10 @@ proxyClient.on("data", data => {//to be implemented: broken packets
                 return proxyClient.end();
                 break;
               case 1:// go on
-              headers[headers.length-1].push("");
+                headers[headers.length-1].push("");
                 break;
               case 2://too many colons, only one (two sections) allowed, attempting to add another
-                console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; expexted a key and value pair of a header, but got a mysterious third value`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
-                proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
-                return proxyClient.end();
+                headers[headers.length-1][1] += strb;
                 break;
             }
             break;
