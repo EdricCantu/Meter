@@ -428,7 +428,7 @@ app.on("connection", proxyClient => {
                       });
                       outbound.on("close", ()=>proxyClient.end())
                       outbound.pipe(proxyClient);//pipe outbound to client
-                      if(method !== "connect"){//send request, body later
+                      if(method !== "CONNECT"){//send request, body later
                         
                         console.log("sending outbound: ",`${method} ${path} ${httpv}\r\n`);
                         outbound.write(`${method} ${path} ${httpv}\r\n`);
