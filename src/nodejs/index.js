@@ -123,38 +123,55 @@ app.on("connection", proxyClient => {
           case "url":
             switch(tokening[1]){
               case "scheme":
-                if(scheme.includes(":")){
-                  if(strb === "/"){
-                    scheme += "/"
-                    if(scheme.endsWith("://")){//permit "http://abc"
-                      scheme = scheme.slice(0,-3);
-                      tokening = ["url", "host"];//triple slashes get handled by host handler
-                    }
-                  }else if((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)){//permit "http:abc"
-                    scheme = scheme.slice(0,-1);
-                    tokening = ["url","host"];
-                    addr--;//go back to this byte
-                  }{//bad scheme, like https:/ok and https::ok
-                    console.warn(`ERR: SCHEME_WEIRD recieved from "${proxyClient.remoteAddress}"; the scheme is weird`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
-                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: SCHEME_WEIRD");
-                    return proxyClient.end();
-                  }
-                }else{
-                  if((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)){
-                    if(scheme.length === 20){//no more than 20
-                      console.warn(`ERR: SCHEME_LONG recieved from "${proxyClient.remoteAddress}"; the scheme is more than 20 characters`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
-                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: SCHEME_LONG");
+                switch(strb){
+                  case ":":
+                    if(scheme.length === 0){
+                      console.warn(`ERR: SCHEME_NOT_GIVEN recieved from "${proxyClient.remoteAddress}"; why does the URL start in a colon?`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
                       return proxyClient.end();
+                    }else if(!scheme.includes(":")){//  x::   x:/: 
+                      console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; extra colon in scheme space`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+                      return proxyClient.end();//"What am i supposed to do with this?"
                     }else{
-                      scheme += strb;
+                      scheme += ":";
                     }
-                  }else if(strb === ":"){
-                    scheme += ":";
-                  }else{
-                    console.warn(`ERR: SCHEME_ILLEGAL recieved from "${proxyClient.remoteAddress}"; the scheme contains an invalid character`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
-                    proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: SCHEME_ILLEGAL");
-                    return proxyClient.end();
-                  }
+                    break;
+                  case "/":
+                    if(!scheme.includes(":")){//GET x(???)/
+                      console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; scheme expected but got what i think is a hostname??`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: PURPOSES_UNKNOWN");
+                      return proxyClient.end();//"What am i supposed to do with this?"
+                    }else if(scheme.endsWith(":")){// x:/
+                      scheme += "/";
+                    }else if(scheme.endsWith(":/")){// scheme://(...)
+                      scheme = scheme.slice(-2);
+                      tokening = ["url", "host"];;//triple slashes get handled by host handler
+                    }else{//might not run
+                      console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; I'm missing an edge case and i don't know what it is. I feel like this might never be seen on the terminal`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                      proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: who knows, not me :S");
+                      return proxyClient.end();//"What am i supposed to do with this?"
+                    }
+                    break;
+                  default:
+                    if((byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A)){
+                      if(!scheme.includes(":")){//still in scheme
+                        scheme += strb;
+                      }else if(scheme.endsWith(":")){// scheme:url
+                        scheme = scheme.slice(0,-1);
+                        tokening = ["url","host"];
+                        addr--;//go back to this byte from host handler
+                      }else if(scheme.endsWith(":/")){//like scheme:/url
+                        console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; Schemes don't look like that, silly!`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: who knows, not me :S");
+                        return proxyClient.end();//"What am i supposed to do with this?"
+                      }else{//might not run
+                        console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; I'm missing an edge case and i don't know what it is. I feel like this might never be seen on the terminal`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                        proxyClient.write("HTTP/1.1 400 Bad Request\n\nERR: who knows, not me :S");
+                        return proxyClient.end();//"What am i supposed to do with this?"
+                      }
+                    }
+                    break;
                 }
                 break;
               case "host":
