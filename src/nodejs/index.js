@@ -262,8 +262,9 @@ function onconnection(proxyClient){
         console.log(`"${proxyClient.remoteAddress}" connected, and is performing a TLS handshake!`);
         const old = proxyClient;
         old.unshift(tlsPacket);
-        //old.on('data', console.log);//works
-        proxyClient = new tls.TLSSocket(proxyClient, {
+        //old.on('data', console.log); //works
+        old.removeAllListeners("data");
+        proxyClient = new tls.TLSSocket(old, {
           isServer: true,
           secureContext: tls.createSecureContext(tlsOptions)
         });
