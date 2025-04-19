@@ -27,13 +27,15 @@ if(["1","true"].includes(process.env.ALLOWLOCAL?.toString()?.toLowerCase())){
   listen();//no need to get TLDs
 }else{//get TLDs
   console.log("The environment variable $ALLOWLOCAL is 0, false, or not set.");
-  console.log("- Connections to private IPs and hostnames,");
-  console.log("--- Like 127.X.X.X, 192.168.X.X, 100.X.X.X [::1], and [::]");
-  console.log("- Will be blocked!")
+  console.log("- Connections to private IPs, like:");
+  console.log(`--- "0.0.0.0", "127.X.X.X", "192.168.X.X", "172.[16-31].X.X.X", "[::1]", "[::]"`);
+  console.log("- And hostnames with (any) nonstandard TLDs, like:");
+  console.log(`--- ".test", ".example", ".invalid", ".localhost", ".local", ".lan", ".private", ".internal", ".intra", ".intranet", ".private", ".corp", ".home", ".lan"`);
+  console.log("- Will be blocked!");
   console.log("Fetching TLDs from data.iana.org to restrict hostnames...");
   const req = require("https").get("https://data.iana.org/TLD/tlds-alpha-by-domain.txt", (res) => {
     if(res.statusCode === 200){
-      res.on('data', (chunk) => {
+      res.on('data', chunk=>{
         for(const byte of chunk){
           const char = String.fromCharCode(byte);
           if(!tld.length){
@@ -53,7 +55,7 @@ if(["1","true"].includes(process.env.ALLOWLOCAL?.toString()?.toLowerCase())){
           }
         }
       });
-      res.on('end', ()=>{ console.log("Done getting TLDs!"); listen() })
+      res.on('end', ()=>{ console.log("Done getting TLDs!"); listen() });
     }else{
       console.error("Is IANA down? Status "+res.statusCode);
       throw("wtf");
@@ -224,49 +226,82 @@ function listen(){
     //TODO: add public IPs
 }
 function onconnection(proxyClient){
-  console.log(`"${proxyClient.remoteAddress}" connected`);
   if(this === srv){//connection to srv
+
+    console.log(`"${proxyClient.remoteAddress}" connected insecurely to the Insecure Server`);
     if(srvRedirect){//redirect to secure port
-      proxyClient.end(`HTTP/1.1 301 HTTPS Enforced\r\nLocation: https://${HOST}:${SECPORT}`);
+      console.log(`-- handled securely!`);
+      proxyClient.end(`HTTP/1.1 301 HTTPS Enforced\r\nLocation: https://${HOST}:${SECPORT}\r\n\r\n`);
+      console.log(`"${proxyClient.remoteAddress}" disconected`);
     }else{//handle in plaintext
+      console.log(`-- handled insecurely!`);
       proxyClient.on("data", dataHandler);
     }
   }else{//connection to secsrv
     proxyClient.once("data", tlsPacket=>{
       if(tlsPacket[0] !== 0x16){//plaintext, likely
+        console.log(`"${proxyClient.remoteAddress}" connected insecurely to the Secure Server!`);
         if(secsrvTLSOnly){//redirect to secure port
-          proxyClient.end(`HTTP/1.1 301 HTTPS Enforced\r\nLocation: https://${HOST}:${SECPORT}`);
+          console.log(`-- handled securely!`);
+          proxyClient.end(`HTTP/1.1 301 HTTPS Enforced\r\nLocation: https://${HOST}:${SECPORT}\r\n\r\n`);
+          return console.log(`"${proxyClient.remoteAddress}" disconected`);
         }else{//handle in plaintext
+          console.log(`-- handled insecurely!`);
           proxyClient.unshift(tlsPacket);
           proxyClient.on("data", dataHandler);
-          proxyClient.on("error", (err) => {
-            console.log(`"${proxyClient.remoteAddress}" had an error in communication: `+err.message);
+          proxyClient.once("error", (err) => {
+            console.log(`"${proxyClient.remoteAddress}" had an error in insecure communication: `+err.message);
+            proxyClient.end();
           });
           proxyClient.once("close", () => {
-            console.log(`"${proxyClient.remoteAddress}" closed connection`);
+            console.log(`"${proxyClient.remoteAddress}" disconected insecurely`);
             if(outbound) outbound.end();
           });
         }
       }else{//TLS attempted
-        console.log(`"${proxyClient.remoteAddress}" is performing a TLS handshake!`);
+        console.log(`"${proxyClient.remoteAddress}" connected, and is performing a TLS handshake!`);
+        const old = proxyClient;
+        old.unshift(tlsPacket);
+        //old.on('data', console.log);//works
         proxyClient = new tls.TLSSocket(proxyClient, {
           isServer: true,
           secureContext: tls.createSecureContext(tlsOptions)
         });
-        proxyClient.unshift(tlsPacket);
         proxyClient.on('secureConnect', () => {
-          console.log(`"${proxyClient.remoteAddress}" finished TLS handshake!`);
+          console.log(`"${proxyClient.remoteAddress}" connected securely to the Secure Server!`);
+          proxyClient.on('data', dataHandler);
+          proxyClient.once("close", () => {
+            console.log(`"${proxyClient.remoteAddress}" disconnected securely!`);
+            if(outbound) outbound.end();
+          });
+          proxyClient.once("error", (err) => {
+            console.log(`"${proxyClient.remoteAddress}" had an error in secured communication: `+err.message);
+            proxyClient.end();
+          });
+          old.once("error", ()=>{});
+          old.once("close", ()=>{});
         });
-        proxyClient.on('data', dataHandler);
-        proxyClient.on("error", (err) => {
-          console.log(`"${proxyClient.remoteAddress}" had an error in communication: `+err.message);
+        proxyClient.once("error", (err) => {
+          console.log(`"${proxyClient.remoteAddress}" had an error in to-be-secured communication: `+err.message);
+          proxyClient.end();
         });
-        proxyClient.once("close", () => {
-          console.log(`"${proxyClient.remoteAddress}" closed connection`);
-          if(outbound) outbound.end();
+        old.once("error", (err)=>{
+          console.log(`"${proxyClient.remoteAddress}" had an error in raw communication: `+err.message);
+          proxyClient.end();
+        });
+        old.once("close", (err) => {
+          console.log(`"${proxyClient.remoteAddress}" disconnected insecurely during a TLS handshake!`);
         });
       }
     });
+    //if data never comes
+      proxyClient.once("close", (err) => {
+        console.log(`"${proxyClient.remoteAddress}" disconnected before sending any data!`);
+      });
+      proxyClient.once("error", (err) => {
+        console.log(`"${proxyClient.remoteAddress}" had an error in communication: `+err.message);
+        proxyClient.end();
+      });
   }
   var method = "";
   var host = [""];
@@ -280,9 +315,14 @@ function onconnection(proxyClient){
   var tokening = ["method"];
   var outbound = null;
   var scheme = null;
+  var body = null;
   function dataHandler(data){
     if(tokening[0] === "body"){
-      outbound.write(data);//"pipe" client to outbound
+      if(host){//proxy request
+        outbound.write(data);//"pipe" client to outbound
+      }else{//server request
+        /////////////
+      }
     }else{
       loop: for(let addr = 0; addr < data.length; addr++){//what the hell why is addr always === "readBigUInt64LE", how has byte or strb not been broken yet
         const byte = data[addr];
@@ -336,7 +376,16 @@ function onconnection(proxyClient){
                     }
                     break;
                   case "/":
-                    if(!scheme.includes(":")){//GET x(???)/
+                    if(!scheme.length){// GET /path
+                      if(method !== "CONNECT"){// "GET /path" or "HEAD /path ..."
+                        path = "/";
+                        tokening = ["path"];
+                        host = null;
+                      }else{// "CONNECT /path ..."
+                        console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; Can't/Won't self tunnel.`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
+                        return proxyClient.end("HTTP/1.1 400 Bad Request\r\n\r\nERR: PURPOSES_UNKNOWN");//"What am i supposed to do with this?"
+                      }
+                    }if(!scheme.includes(":")){//GET x(???)/
                       console.warn(`ERR: INAPPROPRIATE_DELIMITER recieved from "${proxyClient.remoteAddress}"; scheme expected but got what i think is a hostname??`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                       return proxyClient.end("HTTP/1.1 400 Bad Request\r\n\r\nERR: PURPOSES_UNKNOWN");//"What am i supposed to do with this?"
                     }else if(scheme.endsWith(":")){// x:/
@@ -517,13 +566,13 @@ function onconnection(proxyClient){
                         }else if(host[0] === "192" && host[1] === "168"){
                           console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 192.168.X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                           return proxyClient.end("HTTP/1.1 400 Bad Request\r\n\r\nERR: UNSUPPORTED_HOSTNAME");
-                        }else if(host[0] === "172" && host[1] >= 16 && host[1] <= 31){
+                        }else if(host[0] === "172" && parseInt(host[1]) >= 16 && parseInt(host[1]) <= 31){
                           console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; 172.[16...31].X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                           return proxyClient.end("HTTP/1.1 400 Bad Request\r\n\r\nERR: UNSUPPORTED_HOSTNAME");
-                        }else if(host[0] >= 224 && host[0] <= 239){//go on
+                        }else if(parseInt(host[0]) >= 224 && parseInt(host[0]) <= 239){
                           console.warn(`ERR: UNPRIVILEDGED_LOCAL_ACCESS recieved from "${proxyClient.remoteAddress}"; [224...239].X.X.X is restricted`,`\nStopped at: \n"${request}"\n`,{method,host,port,path,httpv});
                           return proxyClient.end("HTTP/1.1 400 Bad Request\r\n\r\nERR: UNSUPPORTED_HOSTNAME");
-                        }else{
+                        }else{//go on
                           tokening[1] = "port";
                         }
                       }else if(!tld.includes(host[host.length-1].toUpperCase())){ //not an IP, if TLD not publicly recognized:
@@ -767,17 +816,42 @@ function onconnection(proxyClient){
               case "\n":
                 switch(headers[headers.length-1].length){
                   case 0:// empty line, making another empty line, indicating end of headers
-                    headers.pop(); //remove empty header
-                    host = host.join(   (host[0] === '[')?(":"):("."));
-                    //logging
-                      console.log(`${method} request for "${host}:${port+path}" over ${httpv}; ${headers.length} headers:`);
-                      for(const i in headers) console.log(`--Header ${i}> ${headers[i][0]}: ${headers[i][1]}`);
-                    //connect and start sending initial request
-                      //check if scheme supported
+                    if(host){
+                      headers.pop(); //remove empty header
+                      host = host.join(   (host[0] === '[')?(":"):("."));
+                      //logging
+                        console.log(`${method} request for "${host}:${port+path}" over ${httpv}; ${headers.length} headers:`);
+                        for(const i in headers) console.log(`--Header ${i}> ${headers[i][0]}: ${headers[i][1]}`);
+                      //connect and start sending initial request
+                        //check if scheme supported
+                          if(method !== "CONNECT"){
+                            switch(scheme){
+                              case "http":
+                                if(!port) port = 80;// for port === 0 (http://hostname.com:0/path) and port === "" (http://hostname.com/path)
+                                break;
+                              //case "ws": break;
+                              default: 
+                                console.warn(`ERR: UNSUPPORTED_SCHEME recieved from "${proxyClient.remoteAddress}"; the scheme is invalid or we don't support it`,`\nStopped at: \n"${request}"\n`,{scheme, method,host,port,path,httpv});
+                                return proxyClient.end("HTTP/1.1 400 Bad Request\r\n\r\nERR: UNSUPPORTED_SCHEME");
+                              break;
+                            }
+                          }
+                        //start outbound connection
+                          outbound = net.createConnection({host, port});
+                          outbound.on('error', (err) => {
+                            console.error(`Outbound connection error: ${err.message}`);
+                            return proxyClient.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+                          });
+                          outbound.on("close", ()=>proxyClient.end())
+                          outbound.pipe(proxyClient);//pipe outbound to client
+                        //send initial response / request
                         if(method !== "CONNECT"){
                           switch(scheme){
                             case "http":
-                              if(!port) port = 80;// for port === 0 (http://hostname.com:0/path) and port === "" (http://hostname.com/path)
+                              console.log("sending outbound: ",`${method} ${path} ${httpv}\r\n`);
+                              outbound.write(`${method} ${path} ${httpv}\r\n`);
+                              for(const header of headers) outbound.write(`${header[0]}: ${header[1]}\r\n`);
+                              outbound.write("\r\n");
                               break;
                             //case "ws": break;
                             default: 
@@ -785,34 +859,11 @@ function onconnection(proxyClient){
                               return proxyClient.end("HTTP/1.1 400 Bad Request\r\n\r\nERR: UNSUPPORTED_SCHEME");
                             break;
                           }
+                        }else{
+                          proxyClient.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+                          //everything in body (i think), which will happen later
                         }
-                      //start outbound connection
-                        outbound = net.createConnection({host, port});
-                        outbound.on('error', (err) => {
-                          console.error(`Outbound connection error: ${err.message}`);
-                          return proxyClient.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
-                        });
-                        outbound.on("close", ()=>proxyClient.end())
-                        outbound.pipe(proxyClient);//pipe outbound to client
-                      //send initial response / request
-                      if(method !== "CONNECT"){
-                        switch(scheme){
-                          case "http":
-                            console.log("sending outbound: ",`${method} ${path} ${httpv}\r\n`);
-                            outbound.write(`${method} ${path} ${httpv}\r\n`);
-                            for(const header of headers) outbound.write(`${header[0]}: ${header[1]}\r\n`);
-                            outbound.write("\r\n");
-                            break;
-                          //case "ws": break;
-                          default: 
-                            console.warn(`ERR: UNSUPPORTED_SCHEME recieved from "${proxyClient.remoteAddress}"; the scheme is invalid or we don't support it`,`\nStopped at: \n"${request}"\n`,{scheme, method,host,port,path,httpv});
-                            return proxyClient.end("HTTP/1.1 400 Bad Request\r\n\r\nERR: UNSUPPORTED_SCHEME");
-                          break;
-                        }
-                      }else{
-                        proxyClient.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-                        //everything in body (i think), which will happen later
-                      }
+                    }
                     tokening = ['body', addr+1]; //currently REQUESTLINE\r\nHEADER: VALUE\r\nHEADER: VALUE\r\n\r\n
                                                  //                                                                 @ index 54. next is index 55, so set 54+1, for proper slicing
 
@@ -856,7 +907,21 @@ function onconnection(proxyClient){
             }
             break;
           case "body":
-            outbound.write(data.slice(addr));//finish this packet, if it kept going
+            if(host){//proxy request
+              outbound.write(data.slice(addr));//finish this packet, if it kept going
+            }else{//server request
+              //dont know how to handle, guess: maybe they want a PAC?
+              //construct PAC. if proxy offline. PAC only used for secsrv, to force insecure requests be proxied securely
+                proxyClient.write("HTTP/1.1 200 OK\r\nContent-Type: application/x-ns-proxy-autoconfig\r\nContent-Length: ");
+                var PAC = 
+`
+function FindProxyForURL(url,host){
+
+`;
+                //...
+                PAC += `return "HTTPS ${(HOST || "127.0.0.1")+":"+SECPORT}"}`;
+                proxyClient.end(PAC.length.toString()+"\r\n\r\n"+PAC);
+            }
             break loop;
         }
       }
