@@ -261,7 +261,6 @@ function onconnection(proxyClient){
       }else{//TLS attempted
         console.log(`"${proxyClient.remoteAddress}" connected, and is performing a TLS handshake!`);
         const old = proxyClient;
-        old.unshift(tlsPacket);
         //old.on('data', console.log); //works
         old.removeAllListeners("data");
         proxyClient = new tls.TLSSocket(old, {
@@ -286,6 +285,10 @@ function onconnection(proxyClient){
           console.log(`"${proxyClient.remoteAddress}" had an error in to-be-secured communication: `+err.message);
           proxyClient.end();
         });
+        proxyClient.on('keylog', (keylog) => {
+          console.log('keylog', keylog.toString());
+        });
+        proxyClient.on('session', session => console.log('session', session));
         old.once("error", (err)=>{
           console.log(`"${proxyClient.remoteAddress}" had an error in raw communication: `+err.message);
           proxyClient.end();
@@ -293,6 +296,7 @@ function onconnection(proxyClient){
         old.once("close", (err) => {
           console.log(`"${proxyClient.remoteAddress}" disconnected insecurely during a TLS handshake!`);
         });
+        old.unshift(tlsPacket);
       }
     });
     //if data never comes
