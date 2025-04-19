@@ -267,7 +267,7 @@ function onconnection(proxyClient){
           isServer: true,
           secureContext: tls.createSecureContext(tlsOptions)
         });
-        proxyClient.on('secureConnect', () => {
+        proxyClient.on('secureConnect', () => {//hmph
           console.log(`"${proxyClient.remoteAddress}" connected securely to the Secure Server!`);
           proxyClient.on('data', dataHandler);
           proxyClient.once("close", () => {
